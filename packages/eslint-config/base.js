@@ -14,6 +14,16 @@ export const config = [
   eslintConfigPrettier,
   ...tseslint.configs.recommended,
   {
+    // --- AJOUTEZ CE BLOC ICI ---
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    // ---------------------------
+  },
+  {
     plugins: {
       turbo: turboPlugin,
     },

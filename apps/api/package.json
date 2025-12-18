@@ -1,0 +1,23 @@
+{
+  "name": "@lovelace/api",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot ./src/index.ts",
+    "start": "bun run ./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.8"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@authzed/authzed-node": "^1.6.1",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.11.1",
+    "postgres": "^3.4.7"
+  }
+}

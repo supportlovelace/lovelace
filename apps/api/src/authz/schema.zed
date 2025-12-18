@@ -1,0 +1,144 @@
+// =================================================================
+// 1. OBJET RACINE DU SYSTÈME LOVELACE
+// Point d'entrée unique pour les super-admins globaux.
+// =================================================================
+definition lovelace_system {
+    relation super_admin: user 
+    permission global_access = super_admin
+}
+
+// =================================================================
+// 2. TYPES DE BASE
+// =================================================================
+definition user {}
+definition service {}
+definition app_feature {}
+
+definition plan {
+    relation feature: app_feature
+    permission has_feature = feature
+}
+
+// =================================================================
+// 3. HIERARCHIE PRINCIPALE
+// =================================================================
+
+definition publisher {
+    // Rôles spécifiques
+    relation admin: user
+    relation member: user
+    relation lovelace_support: user
+    
+    // Héritage du Super-Admin Global
+    relation lovelace_superadmin: user | lovelace_system#super_admin
+    
+    relation has_plan: plan
+    
+    // Permissions
+    permission view = admin + member + lovelace_support + lovelace_superadmin->global_access
+    permission manage = admin + lovelace_superadmin->global_access
+    permission invite_users = admin + lovelace_superadmin->global_access
+}
+
+definition studio {
+    // Hiérarchie
+    relation publisher: publisher
+    
+    // Rôles spécifiques
+    relation admin: user
+    relation member: user
+    relation lovelace_support: user
+
+    // Héritage du Super-Admin Global
+    relation lovelace_superadmin: user | lovelace_system#super_admin
+    
+    relation has_plan: plan
+    
+    // Permissions
+    permission view = admin + member + publisher->view + lovelace_support + lovelace_superadmin->global_access
+    permission manage = admin + publisher->manage + lovelace_superadmin->global_access
+    permission invite_users = admin + publisher->invite_users + lovelace_superadmin->global_access
+}
+
+definition game {
+    // Hiérarchie
+    relation studio: studio
+    
+    // Rôles spécifiques
+    relation admin: user
+    relation member: user
+    relation lovelace_support: user
+    relation reader: service
+    relation writer: service
+
+    // Héritage du Super-Admin Global
+    relation lovelace_superadmin: user | lovelace_system#super_admin
+    
+    // Permissions
+    permission view = admin + member + studio->view + lovelace_support + reader + lovelace_superadmin->global_access
+    permission manage = admin + studio->manage + lovelace_superadmin->global_access
+    permission write_data = writer + admin + lovelace_superadmin->global_access
+    permission invite_users = admin + studio->invite_users + lovelace_superadmin->global_access
+    permission is_visible_member = admin + member + lovelace_superadmin->global_access
+}
+
+
+// =================================================================
+// 4. MODULES ET AUTRES DÉFINITIONS
+// =================================================================
+
+definition platform_connection {
+    relation game: game
+    permission view = game->view
+    permission configure = game->manage
+}
+
+definition review {
+    relation game: game
+    permission view = game->view
+    permission edit_sentiment = game->manage
+}
+
+definition insight {
+    relation game: game
+    permission view = game->view
+    permission edit = game->manage
+}
+
+definition conversation {
+    relation parent: review | insight
+    permission view = parent->view
+    permission reply = parent->view
+}
+
+definition dashboard {
+    relation game: game
+    relation creator: user
+    relation viewer: user
+    relation editor: user
+    
+    permission view = viewer + editor + creator + game->view
+    permission edit = editor + creator
+    permission share = creator + game->manage
+    permission export = creator + game->manage
+    permission delete = creator
+}
+
+definition notification_rule {
+    relation scope: publisher | studio | game
+    relation creator: user
+    permission view = scope->view
+    permission edit = creator + scope->manage
+}
+
+definition folder {
+    relation owner: user
+    permission view = owner
+    permission edit = owner
+}
+
+definition smart_folder {
+    relation game: game
+    permission view = game->view
+    permission edit = game->manage
+}
