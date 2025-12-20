@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run --hot ./src/index.ts",
-    "start": "bun run ./src/index.ts"
+    "start": "bun run ./src/index.ts",
+    "db:studio": "drizzle-kit studio"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -16,8 +17,13 @@
   },
   "dependencies": {
     "@authzed/authzed-node": "^1.6.1",
+    "@aws-sdk/client-s3": "^3.956.0",
+    "axios": "^1.13.2",
+    "bullmq": "^5.66.2",
+    "csv-parser": "^3.2.0",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.11.1",
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.7",
+    "sharp": "^0.34.5"
   }
 }

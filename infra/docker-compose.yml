@@ -1,0 +1,259 @@
+services:
+  # ==========================================
+  # CORE SERVICES (Always On)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: lovelace-db
+    restart: always
+    environment:
+      POSTGRES_DB: lovelace
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-LovelaceSecure2025}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    ports:
+      - "100.90.85.26:5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  spicedb:
+    image: authzed/spicedb:latest
+    container_name: lovelace-spicedb
+    restart: always
+    depends_on:
+      - postgres
+    # Utilisation de Postgres pour la persistance réelle
+    command: serve --grpc-preshared-key ${SPICEDB_KEY:-secret} --datastore-engine=postgres --datastore-conn-uri="postgres://admin:${DB_PASSWORD:-LovelaceSecure2025}@postgres:5432/spicedb?sslmode=disable"
+    ports:
+      - "100.90.85.26:50051:50051"
+      - "100.90.85.26:9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  redis:
+    image: redis:7-alpine
+    container_name: lovelace-cache
+    restart: always
+    volumes:
+      - ./redis-data:/data
+    ports:
+      - "100.90.85.26:6379:6379"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: lovelace-redpanda
+    profiles: ["data"]
+    volumes:
+      - ./redpanda-data:/var/lib/redpanda/data
+    command:
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: lovelace-clickhouse
+    profiles: ["data"]
+    environment:
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ClickHouse_Secure_77!
+      CLICKHOUSE_DB: lovelace
+    ports:
+      - "100.90.85.26:8123:8123"
+      - "100.90.85.26:9000:9000"
+    volumes:
+      - ./clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse-logs:/var/log/clickhouse-server
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  risingwave:
+    image: risingwavelabs/risingwave:latest
+    container_name: lovelace-risingwave
+    profiles: ["data"]
+    command: playground
+    ports:
+      - "100.90.85.26:4566:4566"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+
+  # ==========================================
+  # ANALYTICS (Profile: analytics)
+  # ==========================================
+  minio:
+    image: minio/minio:latest
+    container_name: lovelace-s3
+    profiles: ["analytics"]
+    command: server /data --console-address ":9006"
+    ports:
+      - "100.90.85.26:9005:9000"
+      - "100.90.85.26:9006:9006"
+    volumes:
+      - ./minio-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  cube:
+    image: cubejs/cube:latest
+    container_name: lovelace-cube
+    profiles: ["analytics"]
+    environment:
+      CUBEJS_DB_TYPE: clickhouse
+      CUBEJS_DB_HOST: clickhouse
+      CUBEJS_API_SECRET: ${CUBE_SECRET:-secret}
+    ports:
+      - "100.90.85.26:4000:4000"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  nessie:
+    image: projectnessie/nessie:latest
+    container_name: lovelace-catalog
+    profiles: ["analytics"]
+    ports:
+      - "100.90.85.26:19120:19120"
+    volumes:
+      - ./nessie-data:/var/lib/nessie
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ==========================================
+  # SEARCH & VECTOR (Profile: search)
+  # ==========================================
+  typesense:
+    image: typesense/typesense:latest
+    container_name: lovelace-search
+    profiles: ["search"]
+    environment:
+      TYPESENSE_API_KEY: ${TYPESENSE_KEY:-secret}
+      TYPESENSE_DATA_DIR: /data
+    ports:
+      - "100.90.85.26:8108:8108"
+    volumes:
+      - ./typesense-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: lovelace-qdrant
+    profiles: ["search"]
+    ports:
+      - "100.90.85.26:6333:6333"
+    volumes:
+      - ./qdrant-data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: lovelace-chroma
+    profiles: ["search"]
+    ports:
+      - "100.90.85.26:8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    volumes:
+      - ./chroma-data:/chroma/chroma
+
+  # ==========================================
+  # OPS & ORCHESTRATION (Profile: ops)
+  # ==========================================
+
+  kestra:
+    image: kestra/kestra:latest
+    container_name: lovelace-kestra
+    user: "root"
+    profiles: ["ops"]
+    command: server standalone
+    ports:
+      - "100.90.85.26:8089:8080"
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/kestra
+            driver-class-name: org.postgresql.Driver
+            username: admin
+            password: LovelaceSecure2025
+        kestra:
+          server:
+            address: 0.0.0.0
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: "/app/storage"
+          queue:
+            type: postgres
+          tasks:
+            tmp-dir:
+              path: "/tmp/kestra-wd/tmp"
+          url: "http://100.90.85.26:8089/"
+        flyway:
+          baseline-on-migrate: true
+      # --- SECRETS KESTRA (Base64) ---
+      SECRET_CH_USER: YWRtaW4=
+      SECRET_CH_PASSWORD: Q2xpY2tIb3VzZV9TZWN1cmVfNzch
+      SECRET_S3_ACCESS_KEY: bWluaW9hZG1pbg==  # minioadmin
+      SECRET_S3_SECRET_KEY: bWluaW9hZG1pbg==  # minioadmin
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "/tmp:/tmp"
+      - "./kestra-data:/app/storage"
+    depends_on:
+      postgres:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: lovelace-mlflow
+    profiles: ["ops"]
+    ports:
+      - "100.90.85.26:5000:5000"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ==========================================
+  # HEAVY ANALYTICS (Profile: heavy)
+  # ==========================================
+  trino:
+    image: trinodb/trino:latest
+    container_name: lovelace-trino
+    profiles: ["heavy"]
+    ports:
+      - "100.90.85.26:8083:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 3G

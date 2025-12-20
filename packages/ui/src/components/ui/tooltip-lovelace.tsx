@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "../../lib/utils"
 
 const tooltipLovelaceVariants = cva(
-  "max-w-xs rounded-lg border border-gray-200 bg-white p-0 shadow-lg",
+  "max-w-[260px] rounded-lg border border-gray-200 bg-white p-0 shadow-lg",
   {
     variants: {
       color: {
@@ -26,6 +26,9 @@ interface TooltipLovelaceProps extends VariantProps<typeof tooltipLovelaceVarian
   content: string
   children: React.ReactNode
   className?: string
+  side?: "top" | "right" | "bottom" | "left"
+  align?: "start" | "center" | "end"
+  sideOffset?: number
 }
 
 function TooltipLovelace({
@@ -34,6 +37,9 @@ function TooltipLovelace({
   color,
   children,
   className,
+  side = "top",
+  align = "center",
+  sideOffset = 5,
   ...props
 }: TooltipLovelaceProps) {
   const getColorClasses = () => {
@@ -62,14 +68,16 @@ function TooltipLovelace({
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
             className={cn(tooltipLovelaceVariants({ color, className }))}
-            sideOffset={5}
+            sideOffset={sideOffset}
+            side={side}
+            align={align}
             avoidCollisions
           >
             <div className={cn("rounded-t-lg px-3 py-2", getColorClasses())}>
               <p className="text-sm font-medium text-white text-center">{title}</p>
             </div>
             <div className="rounded-b-lg bg-white px-3 py-2">
-              <p className="text-xs text-black">{content}</p>
+              <p className="text-xs text-black whitespace-pre-wrap">{content}</p>
             </div>
             <TooltipPrimitive.Arrow className="fill-white" />
           </TooltipPrimitive.Content>
@@ -79,5 +87,5 @@ function TooltipLovelace({
   )
 }
 
-export { TooltipLovelace, tooltipLovelaceVariants }
+export { TooltipLovelace }
 export type { TooltipLovelaceProps }

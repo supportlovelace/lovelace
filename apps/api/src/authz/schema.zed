@@ -24,20 +24,20 @@ definition plan {
 // =================================================================
 
 definition publisher {
+    // Hiérarchie racine
+    relation parent_system: lovelace_system
+    
     // Rôles spécifiques
     relation admin: user
     relation member: user
     relation lovelace_support: user
     
-    // Héritage du Super-Admin Global
-    relation lovelace_superadmin: user | lovelace_system#super_admin
-    
     relation has_plan: plan
     
-    // Permissions
-    permission view = admin + member + lovelace_support + lovelace_superadmin->global_access
-    permission manage = admin + lovelace_superadmin->global_access
-    permission invite_users = admin + lovelace_superadmin->global_access
+    // Permissions (Héritage via parent_system)
+    permission view = admin + member + lovelace_support + parent_system->global_access
+    permission manage = admin + parent_system->global_access
+    permission invite_users = admin + parent_system->global_access
 }
 
 definition studio {
@@ -48,16 +48,13 @@ definition studio {
     relation admin: user
     relation member: user
     relation lovelace_support: user
-
-    // Héritage du Super-Admin Global
-    relation lovelace_superadmin: user | lovelace_system#super_admin
     
     relation has_plan: plan
     
-    // Permissions
-    permission view = admin + member + publisher->view + lovelace_support + lovelace_superadmin->global_access
-    permission manage = admin + publisher->manage + lovelace_superadmin->global_access
-    permission invite_users = admin + publisher->invite_users + lovelace_superadmin->global_access
+    // Permissions (Héritage via publisher)
+    permission view = admin + member + publisher->view + lovelace_support
+    permission manage = admin + publisher->manage
+    permission invite_users = admin + publisher->invite_users
 }
 
 definition game {
@@ -70,16 +67,13 @@ definition game {
     relation lovelace_support: user
     relation reader: service
     relation writer: service
-
-    // Héritage du Super-Admin Global
-    relation lovelace_superadmin: user | lovelace_system#super_admin
     
-    // Permissions
-    permission view = admin + member + studio->view + lovelace_support + reader + lovelace_superadmin->global_access
-    permission manage = admin + studio->manage + lovelace_superadmin->global_access
-    permission write_data = writer + admin + lovelace_superadmin->global_access
-    permission invite_users = admin + studio->invite_users + lovelace_superadmin->global_access
-    permission is_visible_member = admin + member + lovelace_superadmin->global_access
+    // Permissions (Héritage via studio)
+    permission view = admin + member + studio->view + lovelace_support + reader
+    permission manage = admin + studio->manage
+    permission write_data = writer + admin + studio->manage
+    permission invite_users = admin + studio->invite_users
+    permission is_visible_member = admin + member + studio->view
 }
 
 

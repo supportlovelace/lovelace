@@ -2,7 +2,9 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { poweredBy } from 'hono/powered-by';
 import { gamesRoute } from './routes/games';
-import { adminRoute } from './routes/admin';
+import adminRoute from './routes/admin';
+import portalRoute from './routes/portal';
+import tooltipsRoute from './routes/tooltips';
 import { authRoute } from './routes/auth';
 import { dashboardRoute } from './routes/dashboard';
 import { requireGlobalAccess } from './middleware/requireGlobalAccess';
@@ -21,7 +23,9 @@ const app = new Hono<{ Variables: Variables }>()
         'http://localhost:5173',
         'http://127.0.0.1:5173',
         'http://localhost:5174',
-        'http://127.0.0.1:5174'
+        'http://127.0.0.1:5174',
+        'http://localhost:5175',
+        'http://127.0.0.1:5175',
       ]);
       return origin && allowed.has(origin) ? origin : '';
     },
@@ -57,12 +61,29 @@ const app = new Hono<{ Variables: Variables }>()
   // Routes dashboard
   .route('/dashboard', dashboardRoute)
   // Routes admin (protégées)
-  .route('/admin', adminRoute.use(requireGlobalAccess))
+  .route('/admin', adminRoute)
+  // Routes portail client
+  .route('/portal', portalRoute)
+  // Routes tooltips
+  .route('/tooltips', tooltipsRoute)
   // Routes jeux
   .route('/games', gamesRoute);
 
+import { startImportWorker } from './worker/import-worker';
+
 // Export indispensable pour le frontend
 export type AppType = typeof app;
+
+console.log("🚀 Serveur API démarré sur le port 3000");
+console.log("📍 R2 Endpoint:", process.env.R2_ENDPOINT || "NON DÉFINI");
+
+// Démarrage du Worker BullMQ (Import CSV)
+try {
+  startImportWorker();
+  console.log("✅ Worker BullMQ (Import CSV) démarré");
+} catch (e) {
+  console.error("❌ Erreur au démarrage du Worker BullMQ:", e);
+}
 
 // Démarrage natif Bun
 export default {

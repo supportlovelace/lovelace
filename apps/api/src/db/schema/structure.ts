@@ -1,21 +1,12 @@
-import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, index, jsonb } from 'drizzle-orm/pg-core';
+import { users } from './users';
+import { assets } from './assets';
 
-// Users table
-export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  email: text('email').notNull().unique(),
-  name: text('name').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow()
-}, (table) => ({
-  emailIdx: index('users_email_idx').on(table.email)
-}));
-
-// Publishers table
 export const publishers = pgTable('publishers', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  metadata: jsonb('metadata').default({}).notNull(),
   createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
@@ -24,11 +15,11 @@ export const publishers = pgTable('publishers', {
   createdByIdx: index('publishers_created_by_idx').on(table.createdBy)
 }));
 
-// Studios table
 export const studios = pgTable('studios', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  metadata: jsonb('metadata').default({}).notNull(),
   publisherId: uuid('publisher_id').notNull().references(() => publishers.id, { onDelete: 'cascade' }),
   createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at').defaultNow(),
@@ -39,11 +30,12 @@ export const studios = pgTable('studios', {
   createdByIdx: index('studios_created_by_idx').on(table.createdBy)
 }));
 
-// Games table (updated with foreign key)
 export const games = pgTable('games', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  metadata: jsonb('metadata').default({}).notNull(),
+  logoAssetId: uuid('logo_asset_id').references(() => assets.id),
   studioId: uuid('studio_id').notNull().references(() => studios.id, { onDelete: 'cascade' }),
   createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at').defaultNow(),
