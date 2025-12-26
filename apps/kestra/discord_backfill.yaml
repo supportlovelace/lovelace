@@ -27,6 +27,10 @@ tasks:
       image: ghcr.io/supportlovelace/lovelace-ingestion:latest
       pullPolicy: ALWAYS
       networkMode: lovelace-infra_default
+      credentials:
+        registry: ghcr.io
+        username: supportlovelace
+        password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
     env:
       DISCORD_TOKEN: "{{ inputs.discord_token }}"
       GUILD_ID: "{{ inputs.guild_id }}"
