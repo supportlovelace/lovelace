@@ -37,6 +37,7 @@ import { cn } from "@repo/ui/lib/utils.ts";
 import { useUserStore } from "../stores/useUserStore";
 import { useAppContext, type Persona } from "../stores/useAppContext";
 import { useMe, usePortalGames } from "../hooks/use-portal";
+import { LayoutGrid, Inbox as InboxIcon } from "lucide-react";
 
 const titleMap: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -53,7 +54,7 @@ export function Header() {
   const { user, setUser } = useUserStore();
   const { data: userData } = useMe();
   const { data: gamesData } = usePortalGames();
-  const { selectedGameIds, toggleGame, persona, setPersona, resetScope } = useAppContext();
+  const { selectedGameIds, toggleGame, persona, setPersona, resetScope, hubViewMode, setHubViewMode } = useAppContext();
   
   const [search, setSearch] = useState("");
   const title = titleMap[location] || "Hub";
@@ -167,6 +168,30 @@ export function Header() {
         
         <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">{title}</h2>
       </div>
+
+      {/* CENTER: Hub View Switcher (Visible only on Hub page) */}
+      {location === "/the-hub" && (
+        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/50 shadow-inner scale-90">
+          <button 
+            onClick={() => setHubViewMode("modern")}
+            className={cn(
+              "px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2",
+              hubViewMode === "modern" ? "bg-white text-slate-900 shadow-md" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <InboxIcon className="w-3.5 h-3.5" /> Inbox
+          </button>
+          <button 
+            onClick={() => setHubViewMode("legacy")}
+            className={cn(
+              "px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2",
+              hubViewMode === "legacy" ? "bg-white text-slate-900 shadow-md" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" /> Columns
+          </button>
+        </div>
+      )}
 
       {/* RIGHT: Persona & User */}
       <div className="flex items-center gap-4">

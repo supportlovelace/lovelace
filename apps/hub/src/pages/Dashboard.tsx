@@ -214,13 +214,15 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="max-w-[1400px] mx-auto py-10 px-8">
-      <AdaBriefing />
-      
-      {currentPersona === "CM" && <RenderCM />}
-      {currentPersona === "DEV" && <RenderDEV />}
-      {currentPersona === "CEO" && <RenderCEO />}
-      {currentPersona === "ADMIN" && <RenderCEO />} {/* Fallback for Admin */}
+    <div className="h-full overflow-y-auto custom-scrollbar">
+      <div className="max-w-[1400px] mx-auto py-10 px-8">
+        <AdaBriefing />
+        
+        {currentPersona === "CM" && <RenderCM />}
+        {currentPersona === "DEV" && <RenderDEV />}
+        {currentPersona === "CEO" && <RenderCEO />}
+        {currentPersona === "ADMIN" && <RenderCEO />} {/* Fallback for Admin */}
+      </div>
     </div>
   );
 }

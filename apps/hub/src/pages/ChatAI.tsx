@@ -74,7 +74,7 @@ export default function ChatAI() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-100px)] -m-8 overflow-hidden bg-white">
+    <div className="flex h-full overflow-hidden bg-white">
       
       {/* 1. SIDEBAR HISTORY */}
       <div className="w-72 bg-slate-50 border-r border-slate-200 flex flex-col">

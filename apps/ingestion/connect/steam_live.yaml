@@ -1,0 +1,31 @@
+input:
+  http_client:
+    url: https://jsonplaceholder.typicode.com/comments?_limit=5
+    verb: GET
+    rate_limit: "steam_api_limit"
+
+pipeline:
+  processors:
+    - unarchive:
+        format: json_array # <--- C'est ça qui "éclate" le tableau en 5 messages distincts
+
+    - mapping: |
+        root.review_id = this.id.string() # On force en string pour Redis
+        root.content = this.body
+        root.author = this.email
+        root.ingested_at = now()
+
+    - cache:
+        resource: lovelace_redis
+        operator: add
+        key: 'steam_review_${!this.review_id}'
+        value: "seen"
+    
+    - catch:
+        - mapping: 'root = deleted()' # On jette silencieusement les doublons
+
+output:
+  kafka:
+    addresses: ["redpanda:9092"]
+    topic: "steam_reviews"
+    client_id: "connect_steam"

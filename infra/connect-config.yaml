@@ -1,0 +1,17 @@
+# connect-config.yaml
+http:
+  enabled: true
+  address: "0.0.0.0:4195"
+
+cache_resources:
+  - label: lovelace_redis
+    redis:
+      url: redis://redis:6379
+      kind: simple
+      default_ttl: 720h
+
+rate_limit_resources:
+  - label: steam_api_limit
+    local:
+      count: 1
+      interval: 60s

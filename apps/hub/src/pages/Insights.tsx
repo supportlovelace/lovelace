@@ -5,19 +5,21 @@ import { InsightDetail } from "../components/insights/InsightDetail";
 
 export default function Insights() {
   return (
-    <div className="max-w-[1400px] mx-auto py-10 px-8">
-      <Switch>
-        {/* Avec 'nest' sur le parent, les chemins ici sont relatifs à /insights */}
-        
-        {/* /insights */}
-        <Route path="/" component={InsightsOverview} />
-        
-        {/* /insights/:domainId */}
-        <Route path="/:domainId" component={InsightsDomain} />
+    <div className="h-full overflow-y-auto custom-scrollbar">
+      <div className="max-w-[1400px] mx-auto py-10 px-8">
+        <Switch>
+          {/* Avec 'nest' sur le parent, les chemins ici sont relatifs à /insights */}
+          
+          {/* /insights */}
+          <Route path="/" component={InsightsOverview} />
+          
+          {/* /insights/:domainId */}
+          <Route path="/:domainId" component={InsightsDomain} />
 
-        {/* /insights/:domainId/:insightId */}
-        <Route path="/:domainId/:insightId" component={InsightDetail} />
-      </Switch>
+          {/* /insights/:domainId/:insightId */}
+          <Route path="/:domainId/:insightId" component={InsightDetail} />
+        </Switch>
+      </div>
     </div>
   );
 }

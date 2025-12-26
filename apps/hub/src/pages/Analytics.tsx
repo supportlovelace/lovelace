@@ -49,7 +49,7 @@ export default function Analytics() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-100px)] -m-8 overflow-hidden bg-slate-50/30">
+    <div className="flex h-full overflow-hidden bg-slate-50/30">
       
       {/* 1. BUILDER SIDEBAR */}
       <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 overflow-y-auto">

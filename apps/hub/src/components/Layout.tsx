@@ -9,11 +9,14 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   return (
-    <div className="h-screen bg-background p-2 overflow-hidden flex gap-4">
+    <div className="h-screen w-screen bg-slate-50/50 p-3 overflow-hidden flex gap-4">
       <Sidebar />
-      <div className="flex flex-1 flex-col h-full overflow-hidden">
+      <div className="flex flex-1 flex-col h-full overflow-hidden bg-white rounded-[2rem] border border-slate-200 shadow-sm">
         <Header />
-        <main className="flex-1 overflow-y-auto p-4">{children}</main>
+        {/* On enlève le padding ici pour que les pages comme le Hub puissent coller aux bords si besoin */}
+        <main className="flex-1 overflow-hidden relative">
+          {children}
+        </main>
       </div>
     </div>
   );

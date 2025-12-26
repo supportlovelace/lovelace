@@ -1,0 +1,6 @@
+dlt
+kafka-python
+psycopg2-binary
+pandas
+python-dotenv
+requests

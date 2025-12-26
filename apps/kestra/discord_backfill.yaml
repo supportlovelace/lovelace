@@ -1,0 +1,36 @@
+id: discord-backfill
+namespace: lovelace.ingestion
+description: "Backfill Discord history to Redpanda using DLT (Docker Image)"
+
+inputs:
+  - id: discord_token
+    type: STRING
+    required: true
+    description: "Bot Token"
+  
+  - id: guild_id
+    type: STRING
+    required: true
+    description: "Discord Server ID"
+
+  - id: kafka_brokers
+    type: STRING
+    defaults: "redpanda:9092"
+    description: "Redpanda Broker Address"
+
+tasks:
+  - id: run_ingestion
+    type: io.kestra.plugin.scripts.python.Commands
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      # Image hébergée sur GHCR (GitHub Container Registry)
+      image: ghcr.io/supportlovelace/lovelace-ingestion:latest
+      pullPolicy: ALWAYS
+      networkMode: lovelace-infra_default
+    env:
+      DISCORD_TOKEN: "{{ inputs.discord_token }}"
+      GUILD_ID: "{{ inputs.guild_id }}"
+      KAFKA_BROKERS: "{{ inputs.kafka_brokers }}"
+    commands:
+      # Le script est déjà dans l'image, au chemin /app/backfill/...
+      - python backfill/discord_dlt_pipeline.py
