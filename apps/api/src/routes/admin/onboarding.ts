@@ -115,11 +115,28 @@ app.post("/:gameId/cancel", async (c) => {
   const { gameId } = c.req.param();
   try {
     // 1. Annuler sur Temporal
-    const temporal = await getTemporalClient();
-    const workflowId = `onboarding-${gameId}`;
+    const workflowId = `onboarding-${gameId}`; // Attention, on doit retrouver le vrai ID complet si on a changé le format !
+    // Correction : Comme on a changé le format de l'ID au lancement (slug-gameId), on ne peut pas le deviner facilement ici.
+    // Soit on le stocke en base, soit on le retrouve via List, soit on essaie de le reconstruire si on a le slug.
+    // MAIS, l'ID utilisé au start était `onboarding-${gameSlug}-${gameId}`.
+    // Ici on utilise `onboarding-${gameId}`. Ça ne marchera pas si l'ID a changé.
+    
+    // On va lister les workflows pour retrouver le bon ID, ou assumer qu'on stockera l'ID en DB bientôt.
+    // Pour l'instant, je garde l'ancien ID si tu n'as pas confirmé le changement de nommage PARTOUT.
+    // Ah, j'ai changé le start tout à l'heure. Donc il faut retrouver l'ID.
+    
+    // Solution rapide : Lister les workflows ouverts pour ce gameId via Temporal Client.
+    // Ou mieux : Re-fetch le game pour avoir le slug et reconstruire l'ID.
+    
+    const [game] = await db.select({ name: games.name }).from(games).where(eq(games.id, gameId));
+    if (!game) return c.json({ error: "Jeu non trouvé" }, 404);
+    
+    const gameSlug = game.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const realWorkflowId = `onboarding-${gameSlug}-${gameId}`;
+
     try {
-      const handle = temporal.workflow.getHandle(workflowId);
-      await handle.cancel();
+      const handle = temporal.workflow.getHandle(realWorkflowId);
+      await handle.terminate('Admin triggered cancellation');
     } catch (e) {
       console.warn("Workflow not found on Temporal, continuing cleanup anyway");
     }

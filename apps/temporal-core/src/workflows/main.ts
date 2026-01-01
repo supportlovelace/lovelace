@@ -71,7 +71,7 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
     const stepsToRun = stepsToProcess.filter((s: any) => validatedSlugs.includes(s.slug));
     const platformGroups = [...new Set(stepsToRun.map((s: any) => s.platform))];
 
-    await Promise.all(platformGroups.map(async (platform) => {
+    const results = await Promise.allSettled(platformGroups.map(async (platform) => {
       const platformSteps = stepsToRun.filter((s: any) => s.platform === platform);
       
       for (const step of platformSteps) {
@@ -111,13 +111,26 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
               await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'completed' });
             } catch (e: any) {
               await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'error', result: { error: e.message } });
+              throw e; // Rethrow to mark platform group as failed
             }
           }
         }
       }
     }));
 
-    console.log("🎉 Onboarding terminé.");
+    // Analyse des résultats
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error(`⚠️ ${failures.length} platform groups failed.`);
+      // On peut décider de throw ici si on veut que le workflow soit marqué Failed à la fin
+      // Si on veut "Partial Success", on ne throw pas.
+      // Pour l'instant, on throw si tout a échoué, sinon on log juste.
+      if (failures.length === results.length) {
+        throw new Error("All onboarding steps failed.");
+      }
+    }
+
+    console.log("🎉 Onboarding terminé (potentiellement partiel).");
 
   } catch (err) {
     if (isCancellation(err)) {

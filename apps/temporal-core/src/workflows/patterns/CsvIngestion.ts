@@ -95,6 +95,18 @@ export async function CsvIngestionWorkflow(params: {
     });
     return `CSV Ingestion Success: ${stepSlug}`;
   } else {
+    // Mise à jour du statut AVANT de faire échouer le workflow
+    await updateOnboardingStatus({ 
+      gameId, 
+      stepSlug, 
+      status: 'error', 
+      result: {
+        kestraExecutionId: kestraExec.id,
+        error: "Job returned FAILED status",
+        details: jobResult?.result
+      }
+    });
+
     throw new ApplicationFailure(`CSV Ingestion Failed`, 'Error', undefined, [], {
       kestraExecutionId: kestraExec.id,
       error: "Job returned FAILED status"

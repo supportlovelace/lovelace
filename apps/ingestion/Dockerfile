@@ -8,14 +8,11 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copie des requirements (si tu en as un, sinon on installe direct)
-# Pour l'instant on installe en direct pour faire simple, 
-# mais idéalement tu devrais avoir un requirements.txt dans apps/ingestion
-RUN pip install --no-cache-dir \
-    dlt \
-    discord.py \
-    kafka-python \
-    duckdb
+# Copie des requirements
+COPY backfill/requirements.txt /app/requirements.txt
+
+# Installation des dépendances Python
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copie du code source
 # On copie tout le dossier 'ingestion' dans /app

@@ -84,6 +84,17 @@ export async function KestraJobWorkflow(params: {
       });
       return "Kestra Job Completed Successfully";
     } else {
+      await updateOnboardingStatus({ 
+        gameId, 
+        stepSlug, 
+        status: 'error', 
+        result: {
+          kestraExecutionId: kestraExec.id,
+          error: "Job returned FAILED status",
+          details: jobResult?.result
+        }
+      });
+
       throw new ApplicationFailure(`Kestra Job Failed`, 'Error', undefined, [], {
         kestraExecutionId: kestraExec.id,
         error: "Job returned FAILED status"
