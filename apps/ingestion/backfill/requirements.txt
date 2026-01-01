@@ -1,4 +1,6 @@
-dlt
+pandas
+boto3
+dlt[clickhouse]
 kafka-python
 psycopg2-binary
 pandas

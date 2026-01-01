@@ -1,12 +1,12 @@
-import { proxyActivities, condition, defineSignal, setHandler, workflowInfo, executeChild } from '@temporalio/workflow';
+import { proxyActivities, condition, defineSignal, setHandler, workflowInfo, ApplicationFailure } from '@temporalio/workflow';
 import type { Activities } from '../../activities';
-import { KestraJobWorkflow } from './KestraJob';
 
-const { createOnboardingRequest, updateOnboardingStatus } = proxyActivities<Activities>({
+const { createOnboardingRequest, updateOnboardingStatus, triggerKestraFlow } = proxyActivities<Activities>({
   startToCloseTimeout: '1 minute',
 });
 
 const inputSignal = defineSignal<[any]>('onboarding_input_received');
+const kestraSignal = defineSignal<[{ status: string, result: any }]>('kestra_job_completed');
 
 export async function CsvIngestionWorkflow(params: {
   gameId: string;
@@ -15,10 +15,16 @@ export async function CsvIngestionWorkflow(params: {
 }): Promise<string> {
   const { gameId, stepSlug, config } = params;
   const info = workflowInfo();
+  
   let userInput: any = null;
+  let jobResult: { status: string, result: any } | null = null;
 
   setHandler(inputSignal, (data) => {
     userInput = data;
+  });
+
+  setHandler(kestraSignal, (data) => {
+    jobResult = data;
   });
 
   // 1. Status Running
@@ -38,34 +44,60 @@ export async function CsvIngestionWorkflow(params: {
     }
   });
 
-  // 3. Attente du Signal (Upload + Mapping validés par l'admin)
+  // 3. Attente de l'upload utilisateur
   await condition(() => userInput !== null);
 
-  // 4. Lancement de l'ingestion Kestra
-  // On délègue le travail lourd au pattern KestraJob
-  console.log("📂 CSV Uploaded via UI. Triggering Kestra Ingestion...");
+  // 4. Lancement direct de l'ingestion Kestra
+  console.log("📂 CSV Uploaded. Triggering Kestra Ingestion directly...");
   
-  await executeChild(KestraJobWorkflow, {
-    args: [{
-      gameId,
-      stepSlug,
-      platform: null, // CSV ingestion is usually generic, or we could pass it if available
-      config: {
-        flowId: "csv-ingestion",
-        namespace: "lovelace.ingestion",
-        timeout: "1 hour",
-        inputs: {
-          s3Key: userInput.s3Key,
-          mapping: JSON.stringify(userInput.mapping), // On passe le mapping en string JSON pour Kestra env var
-          targetTable: config.targetTable
-        }
-      }
-    }],
-    workflowId: `csv-ingest-kestra-${gameId}-${stepSlug}`
+  const kestraExec = await triggerKestraFlow({
+    flowId: "csv-ingestion",
+    namespace: "lovelace.ingestion",
+    temporalWorkflowId: info.workflowId, // C'est NOUS qu'il faut rappeler
+    inputs: {
+      gameId: gameId,
+      stepSlug: stepSlug,
+      s3Key: userInput.s3Key,
+      mapping: JSON.stringify(userInput.mapping),
+      targetTable: config.targetTable
+    },
+    labels: {
+      game_id: gameId,
+      step_slug: stepSlug,
+      platform: "global" // CSV ingestion est souvent agnostique
+    }
   });
 
-  // 5. Completion (Géré par KestraJobWorkflow qui met à jour le statut, mais on peut logger ici)
-  // Note: KestraJobWorkflow met le statut à 'completed' quand il finit.
-  
-  return `CSV Ingestion Success: ${stepSlug}`;
+  console.log(`⏳ Waiting for Kestra execution ${kestraExec.id}...`);
+
+  // 5. Attente de la fin du job Kestra
+  const timeout = "1 hour";
+  const finished = await condition(() => jobResult !== null, timeout);
+
+  if (!finished) {
+    throw new ApplicationFailure(`CSV Ingestion timed out after ${timeout}`);
+  }
+
+  // 6. Finalisation
+  if (jobResult?.status === 'SUCCESS') {
+    const safeResult = (typeof jobResult.result === 'object' && jobResult.result !== null) ? jobResult.result : { raw: jobResult.result };
+    
+    await updateOnboardingStatus({ 
+      gameId, 
+      stepSlug, 
+      status: 'completed', 
+      result: {
+        ...safeResult,
+        id: kestraExec.id,
+        flowId: "csv-ingestion",
+        namespace: "lovelace.ingestion"
+      }
+    });
+    return `CSV Ingestion Success: ${stepSlug}`;
+  } else {
+    throw new ApplicationFailure(`CSV Ingestion Failed`, 'Error', undefined, [], {
+      kestraExecutionId: kestraExec.id,
+      error: "Job returned FAILED status"
+    });
+  }
 }
