@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../../db";
-import { onboardingSteps, gameOnboardingProgress, gamePlatforms, platforms } from "../../db/schema";
+import { onboardingSteps, gameOnboardingProgress, gamePlatforms, platforms, gameOnboardingRequests, games } from "../../db/schema";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getTemporalClient } from "../../lib/temporal";
+import { clickhouse } from "../../lib/clickhouse";
 
 // Config S3 (MinIO sur le VPS)
 const s3Client = new S3Client({
@@ -19,7 +21,9 @@ const BUCKET = process.env.S3_BUCKET_NAME || "lovelace-imports";
 
 const app = new Hono();
 
-// LIST GLOBAL STEPS (platform is NULL)
+// --- CATALOGUE CONFIGURATION ---
+
+// LIST GLOBAL STEPS
 app.get("/global", async (c) => {
   try {
     const steps = await db
@@ -30,7 +34,7 @@ app.get("/global", async (c) => {
     
     return c.json({ steps });
   } catch (error) {
-    return c.json({ error: "Erreur lors de la récupération des étapes globales" }, 500);
+    return c.json({ error: "Erreur récupération étapes" }, 500);
   }
 });
 
@@ -50,241 +54,339 @@ app.post("/global", async (c) => {
 
     return c.json({ step: newStep });
   } catch (error) {
-    return c.json({ error: "Erreur lors de la sauvegarde" }, 500);
+    return c.json({ error: "Erreur sauvegarde" }, 500);
   }
 });
 
-// GET Onboarding status for a game
-app.get("/:gameId", async (c) => {
-  const { gameId } = c.req.param();
+// KESTRA CALLBACK (Webhook)
+app.post("/kestra/callback", async (c) => {
+  const body = await c.req.json();
+  const { temporalWorkflowId, status, result } = body;
+
+  if (!temporalWorkflowId) {
+    return c.json({ error: "Missing temporalWorkflowId" }, 400);
+  }
 
   try {
-    const activePlatforms = await db
-      .select({ slug: platforms.slug })
-      .from(gamePlatforms)
-      .innerJoin(platforms, eq(gamePlatforms.platformId, platforms.id))
-      .where(eq(gamePlatforms.gameId, gameId));
+    const temporal = await getTemporalClient();
+    const handle = temporal.workflow.getHandle(temporalWorkflowId);
     
-    const activePlatformSlugs = activePlatforms.map(p => p.slug);
-    const conditions = [isNull(onboardingSteps.platform)];
-    if (activePlatformSlugs.length > 0) {
-      conditions.push(inArray(onboardingSteps.platform, activePlatformSlugs));
-    }
+    // On signale le workflow Temporal que Kestra a fini
+    await handle.signal('kestra_job_completed', { status, result });
 
-    const catalogSteps = await db
-      .select({
-        step: onboardingSteps,
-        platformName: platforms.name,
-        platformColor: platforms.color,
-      })
-      .from(onboardingSteps)
-      .leftJoin(platforms, eq(onboardingSteps.platform, platforms.slug))
-      .where(or(...conditions))
-      .orderBy(onboardingSteps.order);
-
-    const progress = await db
-      .select()
-      .from(gameOnboardingProgress)
-      .where(eq(gameOnboardingProgress.gameId, gameId));
-
-    const stepsWithStatus = catalogSteps.map(({ step, platformName, platformColor }) => {
-      const stepProgress = progress.find(p => p.stepSlug === step.slug);
-      let isLocked = false;
-      if (step.dependsOn && step.dependsOn.length > 0) {
-        isLocked = step.dependsOn.some(depSlug => {
-          const depProgress = progress.find(p => p.stepSlug === depSlug);
-          return depProgress?.status !== 'completed';
-        });
-      }
-
-      return {
-        ...step,
-        platformName,
-        platformColor,
-        status: stepProgress?.status || 'pending',
-        isLocked,
-        lastRunAt: stepProgress?.lastRunAt || null,
-        result: stepProgress?.result || {}
-      };
-    });
-
-    return c.json({ onboarding: stepsWithStatus });
-  } catch (error) {
-    console.error("[OnboardingRoute] Error:", error);
-    return c.json({ error: "Erreur lors de la récupération de l'onboarding" }, 500);
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error("Kestra Callback Error:", error);
+    return c.json({ error: `Erreur signal: ${error.message}` }, 500);
   }
 });
 
-// PARSE CSV HEADERS
+// --- WORKFLOW ORCHESTRATION (TEMPORAL) ---
+
+// START Onboarding
+app.post("/:gameId/start", async (c) => {
+  const { gameId } = c.req.param();
+  try {
+    const [game] = await db.select({ name: games.name }).from(games).where(eq(games.id, gameId));
+    if (!game) return c.json({ error: "Jeu non trouvé" }, 404);
+
+    const gameSlug = game.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const workflowId = `onboarding-${gameSlug}-${gameId}`;
+    
+    const temporal = await getTemporalClient();
+    
+    const handle = await temporal.workflow.start('MainOnboardingWorkflow', {
+      taskQueue: 'lovelace-core',
+      workflowId,
+      args: [gameId],
+    });
+
+    return c.json({ success: true, workflowId: handle.workflowId });
+  } catch (error: any) {
+    if (error.constructor.name === 'WorkflowExecutionAlreadyStartedError') {
+      return c.json({ error: "Onboarding déjà en cours" }, 409);
+    }
+    return c.json({ error: "Erreur lancement workflow" }, 500);
+  }
+});
+
+// CANCEL Onboarding
+app.post("/:gameId/cancel", async (c) => {
+  const { gameId } = c.req.param();
+  try {
+    // 1. Annuler sur Temporal
+    const temporal = await getTemporalClient();
+    const workflowId = `onboarding-${gameId}`;
+    try {
+      const handle = temporal.workflow.getHandle(workflowId);
+      await handle.cancel();
+    } catch (e) {
+      console.warn("Workflow not found on Temporal, continuing cleanup anyway");
+    }
+
+    // 2. Nettoyer les steps en base (ceux qui ne sont pas 'completed')
+    await db.update(gameOnboardingProgress)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(and(
+        eq(gameOnboardingProgress.gameId, gameId),
+        or(eq(gameOnboardingProgress.status, 'running'), eq(gameOnboardingProgress.status, 'pending'))
+      ));
+
+    // 3. Nettoyer les requêtes en attente
+    await db.update(gameOnboardingRequests)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(and(
+        eq(gameOnboardingRequests.gameId, gameId),
+        eq(gameOnboardingRequests.status, 'pending')
+      ));
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Cancel Onboarding Error:", error);
+    return c.json({ error: "Erreur lors de l'annulation" }, 500);
+  }
+});
+
+// INTERNAL: Create Request (Called by Worker)
+app.post("/requests/create", async (c) => {
+  const body = await c.req.json();
+  try {
+    const [req] = await db.insert(gameOnboardingRequests).values({
+      gameId: body.gameId,
+      stepSlug: body.stepSlug,
+      workflowId: body.workflowId,
+      type: body.type,
+      config: body.config,
+      status: 'pending'
+    }).returning();
+    
+    try {
+        const { io } = await import("../../index");
+        io.to(`game:${body.gameId}`).emit('onboarding_request', req);
+    } catch(e) {}
+
+    return c.json({ request: req });
+  } catch (error) {
+    return c.json({ error: "Erreur création demande" }, 500);
+  }
+});
+
+// GET All Pending Requests (Global)
+app.get("/requests/pending", async (c) => {
+  try {
+    const requests = await db.select({
+        id: gameOnboardingRequests.id,
+        gameId: gameOnboardingRequests.gameId,
+        gameName: games.name,
+        type: gameOnboardingRequests.type,
+        stepSlug: gameOnboardingRequests.stepSlug,
+    })
+    .from(gameOnboardingRequests)
+    .innerJoin(games, eq(gameOnboardingRequests.gameId, games.id))
+    .where(eq(gameOnboardingRequests.status, 'pending'));
+    
+    return c.json({ requests });
+  } catch (error) {
+    return c.json({ error: "Erreur récupération demandes" }, 500);
+  }
+});
+
+// GET Pending Requests for a Game
+app.get("/:gameId/requests", async (c) => {
+  const { gameId } = c.req.param();
+  try {
+    const requests = await db.select().from(gameOnboardingRequests)
+      .where(and(eq(gameOnboardingRequests.gameId, gameId), eq(gameOnboardingRequests.status, 'pending')));
+    return c.json({ requests });
+  } catch (error) {
+    return c.json({ error: "Erreur" }, 500);
+  }
+});
+
+// SUBMIT Request (Signal Temporal)
+app.post("/requests/:requestId/submit", async (c) => {
+  const { requestId } = c.req.param();
+  const body = await c.req.json();
+  try {
+    const [req] = await db.select().from(gameOnboardingRequests).where(eq(gameOnboardingRequests.id, requestId));
+    if (!req) return c.json({ error: "Request not found" }, 404);
+
+    await db.update(gameOnboardingRequests)
+      .set({ status: 'completed', result: body.result, completedAt: new Date() })
+      .where(eq(gameOnboardingRequests.id, requestId));
+
+    const temporal = await getTemporalClient();
+    const handle = temporal.workflow.getHandle(req.workflowId);
+    await handle.signal('onboarding_input_received', body.result);
+
+    return c.json({ success: true });
+  } catch (error: any) {
+    return c.json({ error: `Erreur signal: ${error.message}` }, 500);
+  }
+});
+
+// --- DATA ACTIONS ---
+
+// UPLOAD to S3
+app.post("/upload", async (c) => {
+  try {
+    const body = await c.req.parseBody();
+    const file = body["file"] as File;
+    const gameId = body["gameId"] as string;
+    if (!file || !gameId) return c.json({ error: "Paramètres manquants" }, 400);
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const s3Key = `onboarding/${gameId}/${Date.now()}-${file.name}`;
+    
+    await s3Client.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: s3Key,
+      Body: buffer,
+      ContentType: file.type || "application/octet-stream",
+    }));
+
+    return c.json({ s3Key });
+  } catch (error) {
+    return c.json({ error: "Erreur upload" }, 500);
+  }
+});
+
+// PARSE CSV
 app.post("/parse-csv", async (c) => {
   try {
     const body = await c.req.parseBody();
     const file = body["file"] as File;
     if (!file) return c.json({ error: "Fichier manquant" }, 400);
-
     const text = await file.text();
     const firstLine = text.split("\n")[0].trim();
     const delimiter = firstLine.includes(";") ? ";" : ",";
     const headers = firstLine.split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ""));
-
     return c.json({ headers });
   } catch (error) {
-    return c.json({ error: "Erreur lors du parsing du CSV" }, 500);
+    return c.json({ error: "Erreur parsing" }, 500);
   }
 });
 
-// POST Trigger a step
-app.post("/:gameId/:slug/trigger", async (c) => {
-  const { gameId, slug } = c.req.param();
-  
+// INTROSPECT CSV (via ClickHouse)
+app.post("/introspect-csv", async (c) => {
+  const { s3Key } = await c.req.json();
+  if (!s3Key) return c.json({ error: "Missing s3Key" }, 400);
+
+  const S3_ACCESS = process.env.S3_ACCESS_KEY;
+  const S3_SECRET = process.env.S3_SECRET_KEY;
+  const S3_URL = `http://lovelace-s3:9000/${BUCKET}/${s3Key}`;
+
   try {
-    const contentType = c.req.header("content-type");
-    let file: File | null = null;
-    let mapping: any = null;
-    let targetTable: string | null = null;
-
-    if (contentType?.includes("multipart/form-data")) {
-      const body = await c.req.parseBody();
-      file = body["file"] as File;
-      mapping = typeof body["mapping"] === "string" ? JSON.parse(body["mapping"]) : null;
-      targetTable = body["targetTable"] as string;
-    } else {
-      const body = await c.req.json();
-      mapping = body.mapping;
-      targetTable = body.targetTable;
-    }
-
-    const [step] = await db.select().from(onboardingSteps).where(eq(onboardingSteps.slug, slug));
-    if (!step) return c.json({ error: "Étape non trouvée" }, 404);
-
-    let s3Key = null;
-
-    // 1. Upload vers S3 si fichier présent
-    if (file) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      s3Key = `onboarding/${gameId}/${slug}/${Date.now()}-${file.name}`;
-      
-      await s3Client.send(new PutObjectCommand({
-        Bucket: BUCKET,
-        Key: s3Key,
-        Body: buffer,
-        ContentType: "text/csv",
-      }));
-    }
-
-    // 2. Mettre à jour le statut en 'running'
-    await db.insert(gameOnboardingProgress).values({
-      gameId,
-      stepSlug: slug,
-      status: 'running',
-      lastRunAt: new Date(),
-      result: { s3Key, targetTable, mapping }
-    }).onConflictDoUpdate({
-      target: [gameOnboardingProgress.gameId, gameOnboardingProgress.stepSlug],
-      set: { status: 'running', lastRunAt: new Date(), result: { s3Key, targetTable, mapping } }
+    // 1. Détection automatique du séparateur (S3 Partial Fetch)
+    const getCommand = new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: s3Key,
+      Range: "bytes=0-1024" 
     });
-
-    // 3. Ajouter le job dans la file d'attente (BullMQ)
-    // C'est asynchrone, robuste et ne bloque pas l'API.
-    const { importQueue } = await import("../../lib/queue");
+    const s3Res = await s3Client.send(getCommand);
+    const chunk = await s3Res.Body?.transformToString() || "";
     
-    // On nettoie le mapping pour éviter les soucis de sérialisation
-    const safeMapping: Record<string, string> = {};
-    if (mapping && typeof mapping === 'object') {
-       Object.assign(safeMapping, mapping);
-    }
+    const firstLine = chunk.split("\n")[0];
+    const semiCount = (firstLine.match(/;/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const delimiter = semiCount > commaCount ? ';' : ',';
+    
+    console.log(`🔍 [Introspect] Detected delimiter: '${delimiter}'`);
 
-    const job = await importQueue.add('csv-import', {
-      gameId,
-      stepSlug: slug,
-      targetTable: targetTable || 'unknown_table',
-      s3Key: s3Key || '',
-      mapping: safeMapping
+    // 2. Requête ClickHouse
+    const query = `DESCRIBE s3('${S3_URL}', '${S3_ACCESS}', '${S3_SECRET}', 'CSVWithNames') 
+                   SETTINGS format_csv_delimiter = '${delimiter}'`;
+    
+    const resultSet = await clickhouse.query({
+      query,
+      format: 'JSONEachRow',
     });
 
-    console.log(`📥 [API] Job d'import ajouté à la file: ${job.id}`);
+    const headers = (await resultSet.json()).map((col: any) => col.name);
 
-    return c.json({ 
-      message: "Importation en file d'attente", 
-      status: 'running', 
-      jobId: job.id 
-    });
-
-  } catch (error) {
-    console.error("[OnboardingTrigger] Error:", error);
-    return c.json({ error: "Erreur lors du lancement" }, 500);
+    return c.json({ headers });
+  } catch (error: any) {
+    console.error("ClickHouse Introspection Error:", error);
+    return c.json({ error: "Erreur analyse ClickHouse", details: error.message }, 500);
   }
 });
 
-// POST Mark a step as completed (called by Worker or External)
+// CONFIG UPDATE
+app.post("/config-update", async (c) => {
+  const { gameId, platformSlug, config } = await c.req.json();
+  try {
+    const [integration] = await db.select({ id: gamePlatforms.id, config: gamePlatforms.config })
+      .from(gamePlatforms)
+      .innerJoin(platforms, eq(gamePlatforms.platformId, platforms.id))
+      .where(and(eq(gamePlatforms.gameId, gameId), eq(platforms.slug, platformSlug)));
 
-// POST Mark a step as completed (called by Kestra)
+    if (!integration) return c.json({ error: "Intégration non trouvée" }, 404);
+    const newConfig = { ...(integration.config as object || {}), ...config };
+    await db.update(gamePlatforms).set({ config: newConfig, updatedAt: new Date() }).where(eq(gamePlatforms.id, integration.id));
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: "Erreur config" }, 500);
+  }
+});
+
+// COMPLETE Step
 app.post("/:gameId/:slug/complete", async (c) => {
   const { gameId, slug } = c.req.param();
   const { status, result } = await c.req.json();
-
   try {
-    await db.update(gameOnboardingProgress)
-      .set({ 
-        status: status || 'completed', 
-        result: result || {},
-        updatedAt: new Date() 
-      })
-      .where(and(
-        eq(gameOnboardingProgress.gameId, gameId),
-        eq(gameOnboardingProgress.stepSlug, slug)
-      ));
-
+    await db.insert(gameOnboardingProgress)
+      .values({ gameId, stepSlug: slug, status: status || 'completed', result: result || {}, lastRunAt: new Date(), updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [gameOnboardingProgress.gameId, gameOnboardingProgress.stepSlug],
+        set: { status: status || 'completed', result: result || {}, updatedAt: new Date(), lastRunAt: new Date() }
+      });
     return c.json({ success: true });
   } catch (error) {
-    return c.json({ error: "Erreur lors de la mise à jour" }, 500);
+    return c.json({ error: "Erreur statut" }, 500);
   }
 });
 
-// POST Generic Form Submit
-app.post("/:gameId/:slug/submit-form", async (c) => {
-  const { gameId, slug } = c.req.param();
-  const formData = await c.req.json();
-
+// GET Progress
+app.get("/:gameId", async (c) => {
+  const { gameId } = c.req.param();
   try {
-    const [step] = await db.select().from(onboardingSteps).where(eq(onboardingSteps.slug, slug));
-    if (!step) return c.json({ error: "Étape non trouvée" }, 404);
-    if (step.executorType !== 'form') return c.json({ error: "Cette étape n'est pas un formulaire" }, 400);
+    const activePlatforms = await db.select({ slug: platforms.slug }).from(gamePlatforms)
+      .innerJoin(platforms, eq(gamePlatforms.platformId, platforms.id))
+      .where(eq(gamePlatforms.gameId, gameId));
+    
+    const activePlatformSlugs = activePlatforms.map(p => p.slug);
+    
+    const gameConfigs = await db.select({ slug: platforms.slug, config: gamePlatforms.config, configSchema: platforms.configSchema })
+      .from(gamePlatforms)
+      .innerJoin(platforms, eq(gamePlatforms.platformId, platforms.id))
+      .where(eq(gamePlatforms.gameId, gameId));
 
-    const config = step.executorConfig as any;
-    const targetTable = config.targetTable || 'games';
+    const conditions = [isNull(onboardingSteps.platform)];
+    if (activePlatformSlugs.length > 0) conditions.push(inArray(onboardingSteps.platform, activePlatformSlugs));
 
-    // 1. Mise à jour de l'entité cible (pour l'instant on supporte 'games')
-    if (targetTable === 'games') {
-      const [game] = await db.select().from(games).where(eq(games.id, gameId));
-      if (!game) return c.json({ error: "Jeu non trouvé" }, 404);
+    const catalogSteps = await db.select({ step: onboardingSteps, platformName: platforms.name, platformColor: platforms.color })
+      .from(onboardingSteps)
+      .leftJoin(platforms, eq(onboardingSteps.platform, platforms.slug))
+      .where(or(...conditions)).orderBy(onboardingSteps.order);
 
-      // Merge JSONB metadata
-      const newMetadata = { ...(game.metadata as object || {}), ...formData };
-      
-      await db.update(games)
-        .set({ metadata: newMetadata, updatedAt: new Date() })
-        .where(eq(games.id, gameId));
-    } else {
-      return c.json({ error: `Table cible '${targetTable}' non supportée pour le moment` }, 400);
-    }
+    const progress = await db.select().from(gameOnboardingProgress).where(eq(gameOnboardingProgress.gameId, gameId));
 
-    // 2. Marquer l'onboarding comme complété
-    await db.insert(gameOnboardingProgress).values({
-      gameId,
-      stepSlug: slug,
-      status: 'completed',
-      lastRunAt: new Date(),
-      result: { submittedData: formData }
-    }).onConflictDoUpdate({
-      target: [gameOnboardingProgress.gameId, gameOnboardingProgress.stepSlug],
-      set: { status: 'completed', lastRunAt: new Date(), result: { submittedData: formData } }
+    const stepsWithStatus = catalogSteps.map(({ step, platformName, platformColor }) => {
+      const stepProgress = progress.find(p => p.stepSlug === step.slug);
+      return { 
+        ...step, 
+        platformName, 
+        platformColor, 
+        status: stepProgress?.status || 'pending', 
+        lastRunAt: stepProgress?.lastRunAt || null, 
+        updatedAt: stepProgress?.updatedAt || null,
+        result: stepProgress?.result || {} 
+      };
     });
 
-    return c.json({ success: true, message: "Données enregistrées" });
-  } catch (error: any) {
-    console.error("[OnboardingFormSubmit] Error:", error);
-    return c.json({ error: "Erreur lors de la sauvegarde du formulaire" }, 500);
+    return c.json({ onboarding: stepsWithStatus, configs: gameConfigs });
+  } catch (error) {
+    return c.json({ error: "Erreur récupération" }, 500);
   }
 });
 

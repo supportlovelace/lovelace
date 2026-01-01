@@ -17,7 +17,7 @@ app.get("/", async (c) => {
 
 // CREATE
 app.post("/", async (c) => {
-  const { name, slug, logoAssetId, hasChannel, isActive, color } = await c.req.json();
+  const { name, slug, logoAssetId, hasChannel, isActive, color, configSchema } = await c.req.json();
 
   if (!name || !slug) return c.json({ error: "Nom et slug requis" }, 400);
 
@@ -30,6 +30,7 @@ app.post("/", async (c) => {
         logoAssetId: logoAssetId || null,
         hasChannel: hasChannel ?? false,
         isActive: isActive !== false,
+        configSchema: configSchema || [],
         color,
       })
       .returning();
@@ -115,7 +116,7 @@ app.delete("/onboarding-steps/:slug", async (c) => {
 // UPDATE PLATFORM
 app.put("/:id", async (c) => {
   const { id } = c.req.param();
-  const { name, slug, logoAssetId, hasChannel, isActive, color } = await c.req.json();
+  const { name, slug, logoAssetId, hasChannel, isActive, color, configSchema } = await c.req.json();
 
   try {
     const [updated] = await db
@@ -127,6 +128,7 @@ app.put("/:id", async (c) => {
         hasChannel,
         isActive,
         color,
+        configSchema: configSchema || [],
         updatedAt: new Date(),
       })
       .where(eq(platforms.id, id))

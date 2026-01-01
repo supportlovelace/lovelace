@@ -1,0 +1,6 @@
+@import "@repo/ui/globals.css";
+
+/* Custom overrides for Starlight if needed */
+:root {
+    /* Starlight uses some specific variables, we can map our tokens here if needed */
+}

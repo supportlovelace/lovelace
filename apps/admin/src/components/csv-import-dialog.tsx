@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileUp, Loader2, Table2, Check } from "lucide-react"
 import { toast } from 'sonner'
 import { devHeaders } from '../lib/api'
+import { submitOnboardingRequest } from '../hooks/use-onboarding-requests'
 
 interface CsvImportDialogProps {
   open: boolean
@@ -22,6 +23,7 @@ interface CsvImportDialogProps {
   stepSlug: string
   targetTable: string
   expectedFields: string[] // Liste des colonnes attendues dans ClickHouse
+  requestId?: string // ID de la requête Temporal (V2)
   onSuccess: () => void
 }
 
@@ -34,9 +36,11 @@ export function CsvImportDialog({
   stepSlug,
   targetTable,
   expectedFields,
+  requestId,
   onSuccess
 }: CsvImportDialogProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [s3Key, setS3Key] = useState<string | null>(null)
   const [headers, setHeaders] = useState<string[]>([])
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -49,60 +53,68 @@ export function CsvImportDialog({
     setFile(selectedFile)
     setIsLoading(true)
 
-    // Envoyer à l'API pour parser les headers
     try {
+      // 1. Upload immédiat vers S3 pour introspection
       const formData = new FormData()
       formData.append('file', selectedFile)
+      formData.append('gameId', gameId)
 
-      const res = await fetch(`${API_BASE_URL}/admin/onboarding/parse-csv`, {
+      const uploadRes = await fetch(`${API_BASE_URL}/admin/onboarding/upload`, {
         method: 'POST',
         headers: { ...devHeaders() },
         body: formData
       })
 
-      if (!res.ok) throw new Error('Erreur parsing')
-      const data = await res.json()
-      setHeaders(data.headers)
+      if (!uploadRes.ok) throw new Error('Erreur lors du transfert S3')
+      const { s3Key: uploadedKey } = await uploadRes.json()
+      setS3Key(uploadedKey)
+
+      // 2. Demander à ClickHouse d'analyser le fichier distant
+      const introspectRes = await fetch(`${API_BASE_URL}/admin/onboarding/introspect-csv`, {
+        method: 'POST',
+        headers: { 
+          ...devHeaders(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ s3Key: uploadedKey })
+      })
+
+      if (!introspectRes.ok) throw new Error('Erreur analyse ClickHouse')
+      const { headers: introspectedHeaders } = await introspectRes.json()
+      setHeaders(introspectedHeaders)
       
-      // Auto-mapping simple (si les noms matchent exactement)
+      // Auto-mapping simple
       const initialMapping: Record<string, string> = {}
       expectedFields.forEach(field => {
-        if (data.headers.includes(field)) initialMapping[field] = field
+        if (introspectedHeaders.includes(field)) initialMapping[field] = field
       })
       setMapping(initialMapping)
       
       setStep('mapping')
-    } catch (err) {
-      toast.error("Impossible de lire le fichier CSV")
+    } catch (err: any) {
+      toast.error(err.message || "Impossible d'analyser le fichier")
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleImport = async () => {
+    if (!s3Key) return
     setIsLoading(true)
     try {
-      const formData = new FormData()
-      if (file) formData.append('file', file)
-      formData.append('mapping', JSON.stringify(mapping))
-      formData.append('targetTable', targetTable)
+      if (requestId) {
+        await submitOnboardingRequest(requestId, { 
+          s3Key, 
+          mapping,
+          targetTable
+        })
+        toast.success("Signal envoyé à Temporal")
+      }
 
-      const res = await fetch(`${API_BASE_URL}/admin/onboarding/${gameId}/${stepSlug}/trigger`, {
-        method: 'POST',
-        headers: { 
-          ...devHeaders()
-          // Ne PAS mettre de Content-Type ici, fetch le mettra tout seul avec le boundary pour FormData
-        },
-        body: formData
-      })
-
-      if (!res.ok) throw new Error('Erreur import')
-      
-      toast.success("Importation lancée")
       onSuccess()
       onOpenChange(false)
-    } catch (err) {
-      toast.error("Erreur lors du lancement de l'import")
+    } catch (err: any) {
+      toast.error(err.message || "Erreur lors de l'importation")
     } finally {
       setIsLoading(false)
     }

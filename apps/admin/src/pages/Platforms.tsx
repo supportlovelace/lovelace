@@ -38,6 +38,8 @@ const platformSchema = z.object({
   logoAssetId: z.string().nullable().optional(),
   hasChannel: z.boolean().default(false),
   isActive: z.boolean().default(true),
+  color: z.string().optional(),
+  configSchema: z.string().default(""), // On va transformer en array après
 })
 
 const CDN_URL = import.meta.env.VITE_CDN_URL ?? 'https://cdn.lovelace.gg'
@@ -57,26 +59,41 @@ export function Platforms() {
       logoAssetId: null,
       hasChannel: false,
       isActive: true,
+      color: "#000000",
+      configSchema: "",
     }
   })
 
   const onSubmit = async (values: z.infer<typeof platformSchema>) => {
     setActionLoading(true)
     try {
+      // Transformation de la string configSchema en array
+      const schemaArray = values.configSchema
+        ? values.configSchema.split(',').map(s => s.trim()).filter(s => s.length > 0)
+        : []
+
+      const payload = {
+        ...values,
+        configSchema: schemaArray
+      }
+
       if (editingPlatform) {
         await api.admin.platforms[':id'].$put({
           param: { id: editingPlatform.id },
-          json: values,
+          json: payload as any,
           header: devHeaders(),
         })
         toast.success("Plateforme mise à jour")
       } else {
         await api.admin.platforms.$post({
-          json: values,
+          json: payload as any,
           header: devHeaders(),
         })
         toast.success("Plateforme créée")
       }
+      
+      // On déclenche la mutation. Pour une liste, on laisse souvent le revalidate: true 
+      // pour être sûr de l'ordre, mais on pourrait optimiser davantage si besoin.
       await mutate(['platforms'])
       setIsDialogOpen(false)
       form.reset()
@@ -96,6 +113,8 @@ export function Platforms() {
       logoAssetId: platform.logoAssetId || null,
       hasChannel: platform.hasChannel,
       isActive: platform.isActive,
+      color: platform.color || "#000000",
+      configSchema: (platform.configSchema || []).join(', '),
     })
     setIsDialogOpen(true)
   }
@@ -134,6 +153,21 @@ export function Platforms() {
       )
     },
     { accessorKey: "slug", header: "Slug" },
+    {
+      accessorKey: "color",
+      header: "Couleur",
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <div 
+            className="w-4 h-4 rounded-full border border-gray-200" 
+            style={{ backgroundColor: row.getValue("color") || '#000000' }} 
+          />
+          <span className="text-xs text-muted-foreground font-mono">
+            {row.getValue("color") || '#000000'}
+          </span>
+        </div>
+      )
+    },
     { 
       accessorKey: "hasChannel", 
       header: "Canaux",
@@ -216,6 +250,41 @@ export function Platforms() {
                   <FormItem>
                     <FormLabel>Slug technique (ex: discord)</FormLabel>
                     <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="color"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Couleur</FormLabel>
+                    <div className="flex gap-2">
+                      <FormControl>
+                        <Input {...field} placeholder="#000000" />
+                      </FormControl>
+                      <input
+                        type="color"
+                        value={field.value}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        className="w-10 h-10 p-1 rounded-md border cursor-pointer"
+                      />
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="configSchema"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Champs de configuration requis</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="ex: appId, guildId, subreddit" />
+                    </FormControl>
+                    <p className="text-[10px] text-muted-foreground italic">Séparez les champs par des virgules. Temporal s'assurera que ces champs sont remplis pour chaque jeu.</p>
                     <FormMessage />
                   </FormItem>
                 )}

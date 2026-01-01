@@ -3,15 +3,13 @@ namespace: lovelace.ingestion
 description: "Backfill Discord history to Redpanda using DLT (Docker Image)"
 
 inputs:
-  - id: discord_token
+  - id: temporalWorkflowId
     type: STRING
-    required: true
-    description: "Bot Token"
-  
-  - id: guild_id
+    required: true # Pour le callback vers Temporal
+
+  - id: guildId
     type: STRING
-    required: true
-    description: "Discord Server ID"
+    required: true # Passé par Temporal depuis la config plateforme
 
   - id: kafka_brokers
     type: STRING
@@ -19,11 +17,11 @@ inputs:
     description: "Redpanda Broker Address"
 
 tasks:
+  # 1. Lancer l'ingestion avec le Guild ID reçu en input
   - id: run_ingestion
     type: io.kestra.plugin.scripts.python.Commands
     taskRunner:
       type: io.kestra.plugin.scripts.runner.docker.Docker
-      # Image hébergée sur GHCR (GitHub Container Registry)
       image: ghcr.io/supportlovelace/lovelace-ingestion:latest
       pullPolicy: ALWAYS
       networkMode: lovelace-infra_default
@@ -32,9 +30,39 @@ tasks:
         username: supportlovelace
         password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
     env:
-      DISCORD_TOKEN: "{{ inputs.discord_token }}"
-      GUILD_ID: "{{ inputs.guild_id }}"
+      DISCORD_TOKEN: "{{ secret('DISCORD_TOKEN') }}"
+      GUILD_ID: "{{ inputs.guildId }}"
       KAFKA_BROKERS: "{{ inputs.kafka_brokers }}"
     commands:
-      # Le script est déjà dans l'image, au chemin /app/backfill/...
-      - python backfill/discord_dlt_pipeline.py
+      - python /app/backfill/discord_dlt_pipeline.py
+
+  # 2. Webhook de succès vers l'API Lovelace (Temporal Signal)
+  - id: notify_temporal_success
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://100.111.190.11:3000/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "SUCCESS",
+        "result": { "message": "Ingestion completed" }
+      }
+
+# Gestion d'erreurs globale
+errors:
+  - id: notify_temporal_error
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://100.111.190.11:3000/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "FAILED",
+        "result": { "error": "Kestra Flow Failed" }
+      }

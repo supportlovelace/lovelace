@@ -1,0 +1,24 @@
+{
+  "name": "temporal-core",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/worker.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "tsx": "^4.21.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@infisical/sdk": "^4.0.6",
+    "@temporalio/activity": "^1.14.0",
+    "@temporalio/client": "^1.14.0",
+    "@temporalio/worker": "^1.14.0",
+    "@temporalio/workflow": "^1.14.0",
+    "dotenv": "^17.2.3"
+  }
+}

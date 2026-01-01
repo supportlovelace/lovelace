@@ -1,0 +1,40 @@
+---
+title: Button
+description: Basic button component from @repo/ui.
+---
+
+import { Button } from '@repo/ui/components/ui/button';
+
+The Button component is the primary interactive element in our design system.
+
+## Usage
+
+```tsx
+import { Button } from '@repo/ui/components/ui/button';
+
+export default () => <Button>Click me</Button>;
+```
+
+## Examples
+
+### Default
+<Button client:load>Default Button</Button>
+
+### Outline
+<Button variant="outline" client:load>Outline Button</Button>
+
+### Destructive
+<Button variant="destructive" client:load>Destructive Button</Button>
+
+### Glass
+<div class="p-8 bg-purple-900 rounded-lg">
+  <Button variant="glass" client:load>Glass Button</Button>
+</div>
+
+## Props
+
+| Prop | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `variant` | `default`, `destructive`, `outline`, `secondary`, `ghost`, `glass` | `default` | The visual style of the button. |
+| `size` | `default`, `sm`, `lg`, `icon` | `default` | The size of the button. |
+| `asChild` | `boolean` | `false` | If true, the button will render as its child element (using Radix Slot). |

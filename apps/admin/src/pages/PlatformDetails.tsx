@@ -26,6 +26,7 @@ import {
 } from '@repo/ui/components/ui/form'
 import { Input } from '@repo/ui/components/ui/input'
 import { Textarea } from '@repo/ui/components/ui/textarea'
+import { Switch } from '@repo/ui/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@repo/ui/components/ui/select"
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -34,9 +35,13 @@ import { Share2, ArrowLeft, Plus, Pencil, Trash2, Settings2, Code2, HelpCircle }
 import { toast } from 'sonner'
 import { DeleteConfirmDialog } from '../components/delete-confirm-dialog'
 
+const CDN_URL = import.meta.env.VITE_CDN_URL ?? 'https://cdn.lovelace.gg'
+
 const platformSchema = z.object({
   name: z.string().min(1, "Le nom est requis"),
   color: z.string().optional(),
+  isActive: z.boolean().default(true),
+  configSchema: z.string().default(""),
 })
 
 const stepSchema = z.object({
@@ -45,7 +50,7 @@ const stepSchema = z.object({
   description: z.string().optional(),
   order: z.number().default(0),
   dependsOn: z.string().optional(),
-  executorType: z.enum(["csv_import", "form", "kestra", "temporal", "script", "manual"]),
+  executorType: z.enum(["temporal_activity", "manual"]),
   executorConfig: z.string().default("{}"),
 })
 
@@ -68,11 +73,15 @@ export function PlatformDetails() {
     resolver: zodResolver(platformSchema),
     defaultValues: {
       name: "",
-      color: "#000000"
+      color: "#000000",
+      isActive: true,
+      configSchema: ""
     },
     values: platformData?.platform ? {
       name: platformData.platform.name,
-      color: platformData.platform.color || "#000000"
+      color: platformData.platform.color || "#000000",
+      isActive: platformData.platform.isActive,
+      configSchema: (platformData.platform.configSchema || []).join(', ')
     } : undefined
   })
 
@@ -96,41 +105,32 @@ export function PlatformDetails() {
     if (platformData?.platform && isPlatformDialogOpen) {
       platformForm.reset({
         name: platformData.platform.name,
-        color: platformData.platform.color || "#000000"
+        color: platformData.platform.color || "#000000",
+        isActive: platformData.platform.isActive,
+        configSchema: (platformData.platform.configSchema || []).join(', ')
       })
     }
   }, [platformData, isPlatformDialogOpen, platformForm])
 
   const helpText = useMemo(() => {
     switch (selectedExecutor) {
-      case 'csv_import':
+      case 'temporal_activity':
         return {
-          title: "Importation CSV (BullMQ)",
+          title: "Activité Temporal",
           example: JSON.stringify({
-            requiresCsv: true,
-            targetTable: "test_data",
-            expectedFields: ["date", "viewer"],
-            flowId: "import_csv",
-            namespace: "lovelace"
+            activityName: "createOnboardingRequest",
+            params: {
+              type: "UPLOAD",
+              config: { label: "Upload CSV Steam", accept: ".csv" }
+            }
           }, null, 2),
-          desc: "Déclenche l'interface d'upload et de mapping."
+          desc: "Exécute une activité définie dans le Worker Temporal."
         };
-      case 'form':
+      case 'manual':
         return {
-          title: "Formulaire Dynamique",
-          example: JSON.stringify({
-            targetTable: "games",
-            fields: [
-              { key: "url", label: "Lien", type: "url", required: true }
-            ]
-          }, null, 2),
-          desc: "Affiche un formulaire pour enrichir la fiche du jeu."
-        };
-      case 'kestra':
-        return {
-          title: "Workflow Kestra",
-          example: JSON.stringify({ flowId: "id", namespace: "lovelace" }, null, 2),
-          desc: "Appelle un webhook Kestra externe."
+          title: "Action Manuelle",
+          example: "{}",
+          desc: "Simple case à cocher pour l'admin."
         };
       default:
         return null;
@@ -141,12 +141,25 @@ export function PlatformDetails() {
     if (!platformId) return
     setActionLoading(true)
     try {
-      await api.admin.platforms[':id'].$put({
+      const schemaArray = values.configSchema
+        ? values.configSchema.split(',').map(s => s.trim()).filter(s => s.length > 0)
+        : []
+
+      const res = await api.admin.platforms[':id'].$put({
         param: { id: platformId },
-        json: values,
+        json: {
+          ...values,
+          configSchema: schemaArray
+        } as any,
         header: devHeaders(),
       })
-      await mutate(['platform', platformId])
+      
+      if (!res.ok) throw new Error()
+      const updatedData = await res.json()
+      
+      // Mise à jour locale du cache SWR avec la réponse du serveur
+      await mutate(['platform', platformId], updatedData, { revalidate: false })
+      
       setIsPlatformDialogOpen(false)
       toast.success("Plateforme mise à jour")
     } catch (e) {
@@ -267,9 +280,17 @@ export function PlatformDetails() {
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center shadow-sm" style={{ backgroundColor: `${platform.color}20`, color: platform.color }}>
-              <Share2 className="w-5 h-5" />
-            </div>
+            {platform.logoAssetId ? (
+              <img 
+                src={`${CDN_URL}/assets/${platform.logoAssetId}/48.webp`} 
+                className="w-10 h-10 object-contain" 
+                alt="" 
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full flex items-center justify-center shadow-sm" style={{ backgroundColor: `${platform.color}20`, color: platform.color }}>
+                <Share2 className="w-5 h-5" />
+              </div>
+            )}
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{platform.name}</h1>
               <p className="text-xs text-muted-foreground font-mono">/{platform.slug}</p>
@@ -310,7 +331,7 @@ export function PlatformDetails() {
               </Button>
             </CardHeader>
             <CardContent className="pt-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Slug Unique</label>
                   <p className="mt-1 font-mono text-sm font-medium">{platform.slug}</p>
@@ -320,6 +341,28 @@ export function PlatformDetails() {
                   <div className="flex items-center gap-2 mt-1">
                     <div className="w-5 h-5 rounded-md shadow-sm border border-black/5" style={{ backgroundColor: platform.color || '#000000' }} />
                     <span className="font-mono text-sm uppercase font-medium">{platform.color || '#000000'}</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Statut</label>
+                  <div className="mt-1">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${platform.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {platform.isActive ? 'Actif' : 'Inactif'}
+                    </span>
+                  </div>
+                </div>
+                <div className="lg:col-span-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Champs de configuration requis</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {platform.configSchema && platform.configSchema.length > 0 ? (
+                      platform.configSchema.map((field: string) => (
+                        <span key={field} className="px-2 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-md font-mono text-xs font-bold">
+                          {field}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">Aucun champ requis configuré.</span>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -357,11 +400,7 @@ export function PlatformDetails() {
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl><SelectTrigger className="bg-white border-primary/20"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
-                          <SelectItem value="csv_import">Import CSV (BullMQ)</SelectItem>
-                          <SelectItem value="form">Formulaire Dynamique</SelectItem>
-                          <SelectItem value="kestra">Workflow Kestra</SelectItem>
-                          <SelectItem value="temporal">Temporal</SelectItem>
-                          <SelectItem value="script">Script Custom</SelectItem>
+                          <SelectItem value="temporal_activity">Activité Temporal (Worker)</SelectItem>
                           <SelectItem value="manual">Manuel</SelectItem>
                         </SelectContent>
                       </Select>
@@ -439,22 +478,33 @@ export function PlatformDetails() {
               <FormField control={platformForm.control} name="name" render={({ field }) => (
                 <FormItem><FormLabel className="font-semibold">Nom de la plateforme</FormLabel><FormControl><Input {...field} className="bg-white" /></FormControl><FormMessage /></FormItem>
               )} />
-              <FormField control={platformForm.control} name="color" render={({ field }) => (
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={platformForm.control} name="color" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="font-semibold">Couleur</FormLabel>
+                    <div className="flex gap-2">
+                      <FormControl><Input {...field} placeholder="#000000" className="font-mono bg-white" /></FormControl>
+                      <input type="color" value={field.value} onChange={(e) => field.onChange(e.target.value)} className="w-10 h-10 p-1 rounded-md border cursor-pointer" />
+                    </div>
+                  </FormItem>
+                )} />
+                <FormField control={platformForm.control} name="isActive" render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 bg-white shadow-sm self-end h-[40px]">
+                    <FormLabel className="text-xs font-bold uppercase text-slate-500">Active</FormLabel>
+                    <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                  </FormItem>
+                )} />
+              </div>
+
+              <FormField control={platformForm.control} name="configSchema" render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="font-semibold">Couleur d'identification</FormLabel>
-                  <div className="flex gap-3">
-                    <FormControl><Input {...field} placeholder="#000000" className="font-mono bg-white" /></FormControl>
-                    <input 
-                      type="color" 
-                      value={field.value} 
-                      onChange={(e) => field.onChange(e.target.value)}
-                      className="w-12 h-10 p-1 rounded-lg border border-slate-200 cursor-pointer bg-white"
-                    />
-                  </div>
-                  <p className="text-[10px] text-muted-foreground italic">Cette couleur sera utilisée dans les tableaux et graphiques.</p>
-                  <FormMessage />
+                  <FormLabel className="font-semibold">Champs de configuration requis</FormLabel>
+                  <FormControl><Input {...field} placeholder="ex: appId, guildId" className="bg-white" /></FormControl>
+                  <p className="text-[10px] text-muted-foreground italic">Séparez par des virgules. Utilisé par Temporal pour valider l'onboarding.</p>
                 </FormItem>
               )} />
+
               <div className="pt-4 flex justify-end gap-3">
                 <Button variant="ghost" type="button" onClick={() => setIsPlatformDialogOpen(false)} disabled={actionLoading} className="rounded-full">Annuler</Button>
                 <Button type="submit" disabled={actionLoading} className="px-10 rounded-full font-bold">Enregistrer</Button>

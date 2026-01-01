@@ -5,6 +5,7 @@ import { usePlatforms, useGamePlatforms } from '../hooks/use-platforms'
 import { useUsers } from '../hooks/use-users'
 import { useDiscordGuilds } from '../hooks/use-discord'
 import { useGameOnboarding, triggerOnboardingStep } from '../hooks/use-onboarding'
+import { useOnboardingRequests, submitOnboardingRequest } from '../hooks/use-onboarding-requests'
 import { mutate } from 'swr'
 import { api, devHeaders } from '../lib/api'
 import { Button } from '@repo/ui/components/ui/button'
@@ -21,6 +22,14 @@ import {
   DialogTitle 
 } from "@repo/ui/components/ui/dialog"
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@repo/ui/components/ui/sheet"
+import { ScrollArea } from "@repo/ui/components/ui/scroll-area"
+import {
   Form,
   FormControl,
   FormField,
@@ -35,12 +44,14 @@ import { Combobox } from '@repo/ui/components/ui/combobox'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { Gamepad2, ShieldCheck, ArrowLeft, Building2, Pencil, Trash2, X, Share2, Plus, Settings2, Lock, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
+import { Gamepad2, ShieldCheck, ArrowLeft, Building2, Pencil, Trash2, X, Share2, Plus, Settings2, Lock, CheckCircle2, Clock, AlertCircle, Zap, ChevronRight, XCircle, Activity, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ImageUpload } from '../components/image-upload'
 import { CsvImportDialog } from '../components/csv-import-dialog'
 import { DynamicFormDialog } from '../components/dynamic-form-dialog'
+import { OnboardingInPageReview } from '../components/onboarding-in-page-review'
+import { OnboardingConfigForm } from '../components/onboarding-config-form'
 
 const gameSchema = z.object({
   name: z.string().min(1, "Le nom est requis"),
@@ -60,6 +71,8 @@ const integrationSchema = z.object({
 })
 
 const CDN_URL = import.meta.env.VITE_CDN_URL ?? 'https://cdn.lovelace.gg'
+const TEMPORAL_UI_URL = import.meta.env.VITE_TEMPORAL_UI_URL ?? 'http://localhost:8233';
+const KESTRA_UI_URL = import.meta.env.VITE_KESTRA_UI_URL ?? 'http://localhost:8080';
 
 export function GameDetails() {
   const [, params] = useRoute("/games/:id")
@@ -70,6 +83,7 @@ export function GameDetails() {
   const { data: usersRelationsData, isLoading: usersLoading } = useGameUsers(gameId)
   const { data: integrationsData, isLoading: integrationsLoading } = useGamePlatforms(gameId)
   const { data: onboardingData, isLoading: onboardingLoading } = useGameOnboarding(gameId)
+  const { data: requestsData } = useOnboardingRequests(gameId)
   const { data: allPlatformsData } = usePlatforms()
   const { data: allUsersData } = useUsers()
   const { data: discordGuildsData } = useDiscordGuilds()
@@ -79,8 +93,10 @@ export function GameDetails() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isIntegrationDialogOpen, setIsIntegrationDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
+  const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false)
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [selectedStep, setSelectedStep] = useState<any>(null)
+  const [detailsStep, setDetailsStep] = useState<any>(null)
   const [editingIntegration, setEditingIntegration] = useState<any>(null)
   const [actionLoading, setActionLoading] = useState(false)
 
@@ -112,12 +128,15 @@ export function GameDetails() {
     if (!gameId) return
     setActionLoading(true)
     try {
-      await api.admin.games[':id'].$put({
+      const res = await api.admin.games[':id'].$put({
         param: { id: gameId },
         json: values,
         header: devHeaders(),
       })
-      await mutate(['game', gameId])
+      if (!res.ok) throw new Error()
+      const updatedData = await res.json()
+      
+      await mutate(['game', gameId], updatedData, { revalidate: false })
       setIsEditDialogOpen(false)
       toast.success("Jeu mis à jour")
     } catch (e) {
@@ -238,6 +257,40 @@ export function GameDetails() {
     setIsIntegrationDialogOpen(true)
   }
 
+  const onStartFullOnboarding = async () => {
+    if (!gameId) return
+    setActionLoading(true)
+    try {
+      await api.admin.onboarding[':gameId'].start.$post({
+        param: { gameId },
+        header: devHeaders(),
+      })
+      toast.success("Onboarding démarré")
+      await mutate(['game-onboarding', gameId])
+    } catch (e) {
+      toast.error("Erreur lors du lancement")
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const onCancelOnboarding = async () => {
+    if (!gameId) return
+    setActionLoading(true)
+    try {
+      await api.admin.onboarding[':gameId'].cancel.$post({
+        param: { gameId },
+        header: devHeaders(),
+      })
+      toast.success("Annulation demandée")
+      await mutate(['game-onboarding', gameId])
+    } catch (e) {
+      toast.error("Erreur")
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const onTriggerStep = async (step: any) => {
     if (!gameId) return
 
@@ -336,25 +389,29 @@ export function GameDetails() {
     {
       accessorKey: "title",
       header: "Étape",
-      cell: ({ row }) => (
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2">
-            {row.original.isLocked && <Lock className="w-3 h-3 text-gray-400" />}
-            <span className="font-semibold text-sm">{row.getValue("title")}</span>
+      cell: ({ row }) => {
+        const isDimmed = ['completed', 'skipped', 'cancelled'].includes(row.original.status) || row.original.isLocked;
+        return (
+          <div className={`flex flex-col ${isDimmed ? "opacity-70 grayscale-[0.5]" : ""}`}>
+            <div className="flex items-center gap-2">
+              {row.original.isLocked && <Lock className="w-3 h-3 text-gray-400" />}
+              <span className="font-semibold text-sm">{row.getValue("title")}</span>
+            </div>
+            <span className="text-[11px] text-gray-500 line-clamp-1">{row.original.description}</span>
           </div>
-          <span className="text-[11px] text-gray-500 line-clamp-1">{row.original.description}</span>
-        </div>
-      )
+        )
+      }
     },
     {
       accessorKey: "platformName",
       header: "Source",
       cell: ({ row }) => {
+        const isDimmed = ['completed', 'skipped', 'cancelled'].includes(row.original.status) || row.original.isLocked;
         const name = row.getValue("platformName") as string;
         const color = row.original.platformColor;
         
         return (
-          <div className="flex items-center">
+          <div className={`flex items-center ${isDimmed ? "opacity-70 grayscale-[0.5]" : ""}`}>
             {name ? (
               <div 
                 className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider shadow-sm"
@@ -381,12 +438,12 @@ export function GameDetails() {
       accessorKey: "status",
       header: "Statut",
       cell: ({ row }) => {
-        const status = row.getValue("status") as string
+        const status = row.original.status as string
         const isLocked = row.original.isLocked
         
         if (isLocked) {
           return (
-            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-slate-100 text-slate-400 border border-slate-200">
+            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-slate-100 text-slate-400 border border-slate-200 shadow-sm">
               <Lock className="w-3 h-3" />
               Verrouillé
             </div>
@@ -396,28 +453,42 @@ export function GameDetails() {
         switch (status) {
           case 'completed':
             return (
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-emerald-100 text-emerald-700 border border-emerald-200">
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-sm">
                 <CheckCircle2 className="w-3 h-3" />
                 Terminé
               </div>
             );
           case 'running':
             return (
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-blue-100 text-blue-700 border border-blue-200 animate-pulse">
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-blue-100 text-blue-700 border border-blue-200 animate-pulse shadow-sm">
                 <Clock className="w-3 h-3" />
                 En cours
               </div>
             );
           case 'error':
             return (
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-red-100 text-red-700 border border-red-200">
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-red-100 text-red-700 border border-red-200 shadow-sm">
                 <AlertCircle className="w-3 h-3" />
                 Erreur
               </div>
             );
+          case 'skipped':
+            return (
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-slate-100 text-slate-400 border border-slate-200 shadow-sm">
+                <X className="w-3 h-3" />
+                Passée
+              </div>
+            );
+          case 'cancelled':
+            return (
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-red-100 text-red-700 border border-red-200 shadow-sm">
+                <XCircle className="w-3 h-3" />
+                Annulé
+              </div>
+            );
           default:
             return (
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-slate-100 text-slate-600 border border-slate-200">
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-slate-100 text-slate-600 border border-slate-200 shadow-sm">
                 <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
                 En attente
               </div>
@@ -426,23 +497,78 @@ export function GameDetails() {
       }
     },
     {
+      accessorKey: "lastRunAt",
+      header: "Dernier run",
+      cell: ({ row }) => {
+        const isDimmed = ['completed', 'skipped', 'cancelled'].includes(row.original.status) || row.original.isLocked;
+        const val = row.getValue("lastRunAt") as string;
+        if (!val) return <span className={`text-slate-300 ${isDimmed ? "opacity-70" : ""}`}>-</span>;
+        return (
+          <div className={`flex items-center gap-1.5 text-[10px] font-mono text-slate-500 ${isDimmed ? "opacity-70 grayscale-[0.5]" : ""}`}>
+            <Clock className="w-3 h-3" />
+            {new Date(val).toLocaleString()}
+          </div>
+        );
+      }
+    },
+    {
+      accessorKey: "updatedAt",
+      header: "Mis à jour",
+      cell: ({ row }) => {
+        const isDimmed = ['completed', 'skipped', 'cancelled'].includes(row.original.status) || row.original.isLocked;
+        const val = row.getValue("updatedAt") as string;
+        if (!val) return <span className={`text-slate-300 ${isDimmed ? "opacity-70" : ""}`}>-</span>;
+        return (
+          <div className={`flex items-center gap-1.5 text-[10px] font-mono text-slate-500 ${isDimmed ? "opacity-70 grayscale-[0.5]" : ""}`}>
+            <Activity className="w-3 h-3 text-emerald-500" />
+            {new Date(val).toLocaleString()}
+          </div>
+        );
+      }
+    },
+    {
       id: "actions",
       cell: ({ row }) => {
-        const status = row.getValue("status") as string;
+        const step = row.original;
+        const status = step.status as string;
         const isCompleted = status === 'completed';
-        const isLocked = row.original.isLocked;
+        
+        // Vérifier si une requête attend ce step (directement ou par plateforme)
+        const pendingRequest = requestsData?.requests?.find((r: any) => 
+          r.stepSlug === step.slug || 
+          (r.type === 'CONFIG_FORM' && r.config.platformSlug === step.platform)
+        );
 
         return (
-          <div className="flex justify-end px-2">
-            <Button 
-              variant={isCompleted ? "ghost" : "outline"} 
-              size="sm" 
-              className="h-8 text-xs bg-white"
-              disabled={status === 'running' || isLocked || isCompleted}
-              onClick={() => onTriggerStep(row.original)}
+          <div className="flex justify-end items-center gap-2 px-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => setDetailsStep(step)}
             >
-              {isCompleted ? 'Terminé' : (row.original.executorType === 'csv_import' || row.original.executorConfig?.requiresCsv ? 'Importer' : 'Lancer')}
+              <ExternalLink className="w-4 h-4 text-slate-400" />
             </Button>
+
+            {pendingRequest ? (
+              <Button 
+                variant="default" 
+                size="sm" 
+                className="h-8 text-[10px] font-bold uppercase bg-orange-500 hover:bg-orange-600 text-white border-none shadow-sm animate-pulse"
+                onClick={() => {
+                    setSelectedStep(step);
+                    if (pendingRequest.type === 'UPLOAD_CSV') setIsImportDialogOpen(true);
+                    if (pendingRequest.type === 'CONFIG_FORM') setIsConfigDialogOpen(true);
+                }}
+              >
+                Action Requise
+                <ChevronRight className="w-3 h-3 ml-1" />
+              </Button>
+            ) : (
+              <span className="text-[10px] font-bold uppercase text-slate-400 px-3 py-1">
+                {isCompleted ? 'Terminé' : (status === 'running' ? 'En cours...' : 'Automatique')}
+              </span>
+            )}
           </div>
         )
       }
@@ -453,6 +579,8 @@ export function GameDetails() {
   if (!gameData?.game) return <div className="p-8 text-center text-red-600">Jeu non trouvé</div>
 
   const game = gameData.game
+  const gameSlug = game.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const workflowId = `onboarding-${gameSlug}-${game.id}`;
 
   return (
     <div className="space-y-6">
@@ -502,31 +630,70 @@ export function GameDetails() {
         </TabsList>
 
         <TabsContent value="onboarding" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Configuration du Jeu</h2>
-            <div className="text-xs text-gray-500">
-              Les étapes s'activent en fonction de vos plateformes connectées.
-            </div>
-          </div>
-          <div className="bg-white rounded-lg border overflow-hidden">
-            {onboardingLoading ? <div className="p-8 text-center text-gray-500">Chargement...</div> :
-              <DataTable 
-                columns={onboardingColumns} 
-                data={onboardingData?.onboarding || []} 
-                getRowStyle={(row: any) => {
-                  const color = row.platformColor;
-                  const isCompleted = row.status === 'completed';
-                  const isLocked = row.isLocked;
-                  
-                  return {
-                    backgroundColor: color ? `${color}10` : 'transparent',
-                    opacity: isCompleted || isLocked ? 0.5 : 1,
-                    filter: isCompleted ? 'grayscale(0.5)' : 'none',
-                    borderLeft: color ? `4px solid ${color}` : 'none'
-                  }
-                }}
-              />}
-          </div>
+          {(() => {
+            const planRequest = requestsData?.requests?.find((r: any) => r.type === 'REVIEW_PLAN');
+            
+            if (planRequest) {
+              return (
+                <OnboardingInPageReview 
+                  request={planRequest}
+                  onSuccess={() => {
+                    mutate(['onboarding-requests', gameId]);
+                    mutate(['game-onboarding', gameId]);
+                  }}
+                />
+              );
+            }
+
+            return (
+              <>
+                <div className="flex justify-between items-center bg-white p-6 rounded-xl border shadow-sm">
+                  <div>
+                    <h2 className="text-lg font-bold">Configuration du Jeu</h2>
+                    <p className="text-sm text-muted-foreground">Pilotez le processus complet d'onboarding via Temporal.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    {(onboardingData?.onboarding?.some((s: any) => s.status === 'running') || (requestsData?.requests?.length || 0) > 0) ? (
+                      <Button 
+                        variant="destructive"
+                        onClick={onCancelOnboarding}
+                        disabled={actionLoading}
+                        className="rounded-full px-8 shadow-lg shadow-red-500/20"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Annuler l'Onboarding
+                      </Button>
+                    ) : (
+                      (!onboardingData?.onboarding?.every((s: any) => s.status === 'completed' || s.status === 'skipped')) && (
+                        <Button 
+                          onClick={onStartFullOnboarding} 
+                          disabled={actionLoading}
+                          className="rounded-full px-8 shadow-lg shadow-primary/20"
+                        >
+                          <Zap className="w-4 h-4 mr-2" />
+                          Lancer l'Onboarding
+                        </Button>
+                      )
+                    )}
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border overflow-hidden">
+                  {onboardingLoading ? <div className="p-8 text-center text-gray-500">Chargement...</div> :
+                    <DataTable 
+                      columns={onboardingColumns} 
+                      data={onboardingData?.onboarding || []} 
+                      getRowStyle={(row: any) => {
+                        const color = row.platformColor;
+                        return {
+                          backgroundColor: color ? `${color}10` : 'transparent',
+                          borderLeft: color ? `4px solid ${color}` : 'none'
+                        }
+                      }}
+                    />}
+                </div>
+              </>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="infos" className="space-y-4">
@@ -731,9 +898,13 @@ export function GameDetails() {
           onOpenChange={setIsImportDialogOpen}
           gameId={gameId!}
           stepSlug={selectedStep.slug}
-          targetTable={selectedStep.executorConfig?.targetTable || 'unknown'}
-          expectedFields={selectedStep.executorConfig?.expectedFields || []}
-          onSuccess={() => mutate(['game-onboarding', gameId])}
+          targetTable={selectedStep.executorConfig?.params?.targetTable || 'unknown'}
+          expectedFields={selectedStep.executorConfig?.params?.expectedColumns?.map((c: any) => c.key) || []}
+          requestId={requestsData?.requests?.find((r: any) => r.stepSlug === selectedStep.slug)?.id}
+          onSuccess={() => {
+            mutate(['game-onboarding', gameId]);
+            mutate(['onboarding-requests', gameId]);
+          }}
         />
       )}
 
@@ -746,6 +917,108 @@ export function GameDetails() {
           onSuccess={() => mutate(['game-onboarding', gameId])}
         />
       )}
+
+      {selectedStep && isConfigDialogOpen && (() => {
+        const configRequest = requestsData?.requests?.find((r: any) => 
+          (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && r.config.platformSlug === selectedStep.platform)) && 
+          r.type === 'CONFIG_FORM'
+        );
+        if (!configRequest) return null;
+        return (
+          <OnboardingConfigForm
+            request={configRequest}
+            gameId={gameId!}
+            onClose={() => setIsConfigDialogOpen(false)}
+            onSuccess={() => {
+              setIsConfigDialogOpen(false);
+              mutate(['onboarding-requests', gameId]);
+              mutate(['game-onboarding', gameId]);
+              mutate(['game-platforms', gameId]);
+            }}
+          />
+        );
+      })()}
+      <Sheet open={!!detailsStep} onOpenChange={(open) => !open && setDetailsStep(null)}>
+        <SheetContent className="w-[600px] sm:w-[540px]">
+          <SheetHeader>
+            <SheetTitle>{detailsStep?.title}</SheetTitle>
+            <SheetDescription>{detailsStep?.description}</SheetDescription>
+          </SheetHeader>
+          
+          {detailsStep && (
+            <div className="space-y-6 py-6">
+              {/* Status Section */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-slate-500 uppercase">Statut</p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm capitalize">{detailsStep.status}</span>
+                  </div>
+                </div>
+                <div className="text-right space-y-1">
+                  <p className="text-xs font-medium text-slate-500 uppercase">Dernier Run</p>
+                  <p className="font-mono text-xs">{detailsStep.lastRunAt ? new Date(detailsStep.lastRunAt).toLocaleString() : '-'}</p>
+                </div>
+              </div>
+
+              {/* Links Section */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm">Liens Externes</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <a 
+                    href={`${TEMPORAL_UI_URL}/namespaces/default/workflows/${workflowId}`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-2 p-3 border rounded-md hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs">T</div>
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">Temporal</p>
+                      <p className="text-[10px] text-slate-500">Voir l'historique</p>
+                    </div>
+                    <ExternalLink className="w-4 h-4 text-slate-400" />
+                  </a>
+
+                  {(() => {
+                    const res = detailsStep.result || {};
+                    const execConfig = detailsStep.executorConfig?.params || {};
+                    const kestraId = res.id; // L'ID d'exécution qu'on a ajouté
+                    const namespace = res.namespace || execConfig.namespace || 'lovelace.ingestion';
+                    const flowId = res.flowId || execConfig.flowId;
+
+                    if (!flowId) return null;
+
+                    return (
+                      <a 
+                        href={`${KESTRA_UI_URL}/ui/executions/${namespace}/${flowId}${kestraId ? `/${kestraId}` : ''}`}
+                        target="_blank" 
+                        rel="noreferrer"
+                        title={kestraId ? `Execution ID: ${kestraId}` : undefined}
+                        className="flex items-center gap-2 p-3 border rounded-md hover:bg-purple-50 border-purple-100 transition-colors"
+                      >
+                        <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-xs">K</div>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm text-purple-900">Kestra</p>
+                          <p className="text-[10px] text-purple-500">Voir l'exécution</p>
+                        </div>
+                        <ExternalLink className="w-4 h-4 text-purple-400" />
+                      </a>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Logs / Result Section */}
+              <div className="space-y-2">
+                <h3 className="font-semibold text-sm">Résultat & Logs</h3>
+                <ScrollArea className="h-[300px] w-full rounded-md border p-4 bg-slate-900 text-slate-50 font-mono text-xs">
+                  <pre>{JSON.stringify(detailsStep.result || {}, null, 2)}</pre>
+                </ScrollArea>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

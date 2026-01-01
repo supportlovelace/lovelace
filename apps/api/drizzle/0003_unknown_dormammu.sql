@@ -1,0 +1,1 @@
+ALTER TABLE "platforms" ADD COLUMN "config_schema" jsonb DEFAULT '[]'::jsonb NOT NULL;

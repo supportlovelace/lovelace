@@ -1,0 +1,94 @@
+id: csv-ingestion
+namespace: lovelace.ingestion
+description: "Ingest CSV file from S3 to ClickHouse using DLT (Generic)"
+
+inputs:
+  - id: gameId
+    type: STRING
+    required: true
+  - id: stepSlug
+    type: STRING
+    required: true # Pour les labels
+  - id: temporalWorkflowId
+    type: STRING
+    required: true
+  
+  # Paramètres spécifiques CSV
+  - id: s3Key
+    type: STRING
+    required: true
+  - id: targetTable
+    type: STRING
+    required: true
+  - id: mapping
+    type: JSON
+    required: true
+  - id: s3Bucket
+    type: STRING
+    defaults: "lovelace-imports"
+
+tasks:
+  # 1. Exécution du script d'ingestion
+  - id: run_dlt_ingestion
+    type: io.kestra.plugin.scripts.python.Commands
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      image: ghcr.io/supportlovelace/lovelace-ingestion:latest
+      pullPolicy: ALWAYS
+      networkMode: lovelace-infra_default
+      credentials:
+        registry: ghcr.io
+        username: supportlovelace
+        password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
+    env:
+      # Secrets Infrastructure
+      S3_ENDPOINT: "http://lovelace-s3:9000"
+      S3_ACCESS_KEY: "{{ secret('S3_ACCESS_KEY') }}"
+      S3_SECRET_KEY: "{{ secret('S3_SECRET_KEY') }}"
+      CH_HOST: "lovelace-clickhouse"
+      CH_USER: "{{ secret('CH_USER') }}"
+      CH_PASSWORD: "{{ secret('CH_PASSWORD') }}"
+      
+      # Paramètres d'exécution
+      S3_BUCKET: "{{ inputs.s3Bucket }}"
+      S3_KEY: "{{ inputs.s3Key }}"
+      TARGET_TABLE: "{{ inputs.targetTable }}"
+      GAME_ID: "{{ inputs.gameId }}"
+      MAPPING_JSON: "{{ inputs.mapping }}"
+    commands:
+      - python /app/backfill/csv_to_clickhouse.py
+
+  # 2. Webhook de succès
+  - id: notify_temporal_success
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ secret('LOVELACE_API_URL') }}/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "SUCCESS",
+        "result": { 
+          "message": "CSV Ingestion completed",
+          "targetTable": "{{ inputs.targetTable }}",
+          "rows": "Check logs"
+        }
+      }
+
+# Gestion d'erreurs
+errors:
+  - id: notify_temporal_error
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ secret('LOVELACE_API_URL') }}/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "FAILED",
+        "result": { "error": "CSV Ingestion Failed" }
+      }
