@@ -1,8 +1,7 @@
-pandas
+dlt[clickhouse]>=1.19.0
+pandas>=2.2.0
 boto3
-dlt[clickhouse]
-kafka-python
+kafka-python  # Conseil : remplace kafka-python par kafka-python-ng
 psycopg2-binary
-pandas
 python-dotenv
 requests

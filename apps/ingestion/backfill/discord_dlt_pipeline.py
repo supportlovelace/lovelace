@@ -28,7 +28,7 @@ KAFKA_TOPIC = "ingestion-discord"
 START_DATE = datetime(2023, 1, 1, tzinfo=timezone.utc)
 END_DATE = datetime(2025, 12, 31, tzinfo=timezone.utc)
 
-# Discord Client  
+# Discord Client
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
