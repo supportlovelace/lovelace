@@ -55,6 +55,7 @@ export const platformRoles = pgTable('platform_roles', {
   externalId: text('external_id').notNull(), // ID du rôle Discord
   name: text('name').notNull(),
   color: text('color'), // ex: #FF0000
+  category: text('category').default('member'), // 'admin', 'moderator', 'developer', 'community_manager', 'playtester', 'member'
   position: integer('position').default(0), // Pour l'ordre hiérarchique
   permissions: jsonb('permissions').default({}), // Bitfield ou liste de perms
   metadata: jsonb('metadata').default({}),

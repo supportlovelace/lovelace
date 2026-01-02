@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo, executeActivity, condition, defineSignal, setHandler, executeChild, isCancellation, CancellationScope } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo, executeActivity, condition, defineSignal, setHandler, executeChild, isCancellation, CancellationScope, ApplicationFailure } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { CsvIngestionWorkflow } from './patterns/CsvIngestion';
 import { KestraJobWorkflow } from './patterns/KestraJob';
@@ -21,8 +21,9 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
   // 1. RÉCUPÉRATION DU PLAN INITIAL
   const { onboarding: allSteps } = await actions.getOnboardingSteps(gameId);
   
-  // 2. FILTRAGE DELTA (On ne propose que ce qui n'est pas fini ou déjà skipped)
-  const stepsToProcess = allSteps.filter((s: any) => s.status !== 'completed' && s.status !== 'skipped');
+  // 2. FILTRAGE DELTA (On ne propose que ce qui n'est pas fini)
+  // On inclut les 'skipped' pour permettre de revenir dessus lors d'un nouveau run
+  const stepsToProcess = allSteps.filter((s: any) => s.status !== 'completed');
   
   if (stepsToProcess.length === 0) {
     console.log("✅ Onboarding déjà complet pour ce jeu.");
@@ -34,10 +35,10 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
     const platforms = [...new Set(stepsToProcess.map((s: any) => s.platform).filter(Boolean))];
     
     for (const platform of platforms) {
-      const isValid = await actions.validatePlatformConfig({ 
-        gameId, 
-        platformSlug: platform as string, 
-        workflowId: info.workflowId 
+      const isValid = await actions.validatePlatformConfig({
+        gameId,
+        platformSlug: platform as string,
+        workflowId: info.workflowId
       });
 
       if (!isValid) {
@@ -82,12 +83,12 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
             args: [{ gameId, stepSlug: step.slug, config: config.params }],
             workflowId: `csv-ingest-${gameId}-${step.slug}`,
           });
-        } 
+        }
         else if (config.onboardingType === 'KESTRA_JOB_PATTERN') {
           await executeChild(KestraJobWorkflow, {
-            args: [{ 
-              gameId, 
-              stepSlug: step.slug, 
+            args: [{
+              gameId,
+              stepSlug: step.slug,
               config: config.params,
               platform: step.platform
             }],
@@ -126,10 +127,9 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
       // Si on veut "Partial Success", on ne throw pas.
       // Pour l'instant, on throw si tout a échoué, sinon on log juste.
       if (failures.length === results.length) {
-        throw new Error("All onboarding steps failed.");
+        throw ApplicationFailure.create("All onboarding steps failed.");
       }
     }
-
     console.log("🎉 Onboarding terminé (potentiellement partiel).");
 
   } catch (err) {

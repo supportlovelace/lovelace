@@ -1,0 +1,1 @@
+ALTER TABLE "platform_roles" ADD COLUMN "category" text DEFAULT 'member';

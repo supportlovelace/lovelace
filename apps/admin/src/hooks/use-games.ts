@@ -35,3 +35,13 @@ export function useGameUsers(id?: string) {
     return getJson(res)
   })
 }
+
+export function useGameRoles(id?: string) {
+  return useSWR(id ? ['game-roles', id] : null, async () => {
+    const res = await (api.admin.games[':id'] as any).roles.$get({
+      param: { id: id as string },
+      header: devHeaders(),
+    })
+    return getJson(res)
+  })
+}

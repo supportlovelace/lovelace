@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../../db";
-import { studios, games, publishers, users, platforms, gamePlatforms } from "../../db/schema";
-import { eq, inArray, and } from "drizzle-orm";
+import { studios, games, publishers, users, platforms, gamePlatforms, platformRoles } from "../../db/schema";
+import { eq, inArray, and, sql } from "drizzle-orm";
 import { v1 } from "@authzed/authzed-node";
 import { spicedbClient } from "../../authz/client";
 import { makeAuthMetadata, deleteResourceRelationships } from "./utils";
@@ -295,6 +295,66 @@ app.delete("/:id/platforms/:integrationId", async (c) => {
     return c.json({ message: "Intégration supprimée" });
   } catch (error) {
     return c.json({ error: "Erreur lors de la suppression" }, 500);
+  }
+});
+
+// --- ROLES MANAGEMENT ---
+
+// LIST ROLES FOR A GAME (For Mapping)
+app.get("/:id/roles", async (c) => {
+  const { id } = c.req.param();
+  try {
+    const roles = await db
+      .select({
+        id: platformRoles.id,
+        name: platformRoles.name,
+        category: platformRoles.category,
+        externalId: platformRoles.externalId,
+        platformName: platforms.name,
+        platformSlug: platforms.slug,
+      })
+      .from(platformRoles)
+      .innerJoin(gamePlatforms, eq(platformRoles.gamePlatformId, gamePlatforms.id))
+      .innerJoin(platforms, eq(gamePlatforms.platformId, platforms.id))
+      .where(eq(gamePlatforms.gameId, id))
+      .orderBy(platforms.name, platformRoles.name);
+
+    return c.json({ roles });
+  } catch (error) {
+    return c.json({ error: "Erreur récupération rôles" }, 500);
+  }
+});
+
+// UPDATE ROLE MAPPING
+app.post("/:id/roles/mapping", async (c) => {
+  const { id } = c.req.param();
+  const { mapping } = await c.req.json(); // { "role-uuid": "moderator", ... }
+
+  if (!mapping || Object.keys(mapping).length === 0) {
+    return c.json({ message: "Aucun mapping à mettre à jour" });
+  }
+
+  try {
+    // Sécurité : Vérifier que les rôles appartiennent bien au jeu
+    await db.transaction(async (tx) => {
+      for (const [roleId, category] of Object.entries(mapping)) {
+        await tx
+          .update(platformRoles)
+          .set({ category: category as string, updatedAt: new Date() })
+          .where(and(
+            eq(platformRoles.id, roleId),
+            inArray(
+              platformRoles.gamePlatformId,
+              tx.select({ id: gamePlatforms.id }).from(gamePlatforms).where(eq(gamePlatforms.gameId, id))
+            )
+          ));
+      }
+    });
+
+    return c.json({ success: true, count: Object.keys(mapping).length });
+  } catch (error) {
+    console.error("Mapping Error:", error);
+    return c.json({ error: "Erreur mise à jour mapping" }, 500);
   }
 });
 

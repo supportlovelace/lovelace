@@ -1,0 +1,66 @@
+id: reddit-sync
+namespace: lovelace.ingestion
+description: "Sync Reddit Moderators to Postgres"
+
+inputs:
+  - id: subreddit
+    type: STRING
+    required: true
+  - id: gameId
+    type: STRING
+    required: true
+  - id: temporalWorkflowId
+    type: STRING
+    required: true
+
+tasks:
+  - id: sync_mods
+    type: io.kestra.plugin.scripts.python.Commands
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      image: ghcr.io/supportlovelace/lovelace-ingestion:latest
+      pullPolicy: ALWAYS
+      networkMode: lovelace-infra_default
+      credentials:
+        registry: ghcr.io
+        username: supportlovelace
+        password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
+    env:
+      SUBREDDIT: "{{ inputs.subreddit }}"
+      GAME_ID: "{{ inputs.gameId }}"
+      # On reconstruit l'URL si besoin, ou on utilise le secret complet s'il existe
+      # DB_URL format: postgresql://user:pass@host:port/db
+      DB_URL: "postgresql://{{ secret('DB_USER') }}:{{ secret('DB_PASSWORD') }}@postgres:5432/lovelace"
+    commands:
+      - python /app/backfill/reddit_moderators.py
+
+  # Webhook de succès
+  - id: notify_temporal_success
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ secret('LOVELACE_API_URL') }}/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "SUCCESS",
+        "result": { "message": "Reddit Mods Synced" }
+      }
+
+# Gestion d'erreurs
+errors:
+  - id: notify_temporal_error
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ secret('LOVELACE_API_URL') }}/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "FAILED",
+        "result": { "error": "Reddit Sync Failed" }
+      }
