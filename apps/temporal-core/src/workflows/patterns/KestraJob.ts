@@ -43,6 +43,8 @@ export async function KestraJobWorkflow(params: {
     }
 
     const finalInputs = {
+      gameId,
+      stepSlug,
       ...config.inputs,
       ...platformInputs
     };

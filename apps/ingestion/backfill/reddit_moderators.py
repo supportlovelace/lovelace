@@ -1,30 +1,39 @@
 import os
-import requests
+import praw
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json
 
 def sync_moderators():
     # 1. Config
-    subreddit = os.getenv("SUBREDDIT")
+    subreddit_name = os.getenv("SUBREDDIT")
     game_id = os.getenv("GAME_ID")
-    db_url = os.getenv("DB_URL") # Format: postgresql://user:pass@host:port/db
+    db_url = os.getenv("DB_URL")
     
-    if not subreddit or not game_id or not db_url:
-        raise ValueError("Missing SUBREDDIT, GAME_ID or DB_URL env vars")
+    # Reddit API Config
+    client_id = os.getenv("REDDIT_CLIENT_ID")
+    client_secret = os.getenv("REDDIT_CLIENT_SECRET")
+    user_agent = os.getenv("REDDIT_USER_AGENT", "LovelaceIngestion/1.0 by reddit_user")
 
-    print(f"🚀 Syncing moderators for r/{subreddit} (Game: {game_id})")
+    if not all([subreddit_name, game_id, db_url, client_id, client_secret]):
+        raise ValueError("Missing required environment variables (SUBREDDIT, GAME_ID, DB_URL, REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)")
 
-    # 2. Fetch Reddit API
-    headers = {"User-Agent": "LovelaceIngestion/1.0"}
-    url = f"https://www.reddit.com/r/{subreddit}/about/moderators.json"
-    
-    resp = requests.get(url, headers=headers)
-    resp.raise_for_status()
-    
-    data = resp.json()
-    moderators = data.get("data", {}).get("children", [])
-    
-    print(f"📦 Found {len(moderators)} moderators")
+    print(f"🚀 Syncing moderators for r/{subreddit_name} using PRAW (Game: {game_id})")
+
+    # 2. Authentification Reddit
+    reddit = praw.Reddit(
+        client_id=client_id,
+        client_secret=client_secret,
+        user_agent=user_agent
+    )
+
+    try:
+        subreddit = reddit.subreddit(subreddit_name)
+        # On récupère les modérateurs (PRAW gère la pagination et le rate limiting)
+        moderators = list(subreddit.moderator())
+        print(f"📦 Found {len(moderators)} moderators")
+    except Exception as e:
+        print(f"❌ Error fetching from Reddit API: {e}")
+        raise e
 
     # 3. Database Connection
     conn = psycopg2.connect(db_url)
@@ -48,18 +57,19 @@ def sync_moderators():
         print(f"✅ Found GamePlatform ID: {game_platform_id}")
 
         for mod in moderators:
-            # Structure Reddit: { name, id (t2_...), author_flair_text, mod_permissions, date }
-            username = mod["name"]
-            user_id = mod["id"] # t2_xyz
-            flair = mod.get("author_flair_text")
+            # PRAW ReditObject: mod est un objet 'Redditor' enrichi avec ses permissions
+            username = mod.name
+            user_id = f"t2_{mod.id}" # On préfixe manuellement si besoin, ou on utilise l'ID brut
             
-            # 1. Gestion du Rôle
-            # Si flair vide, on met 'Admin' par défaut
-            role_name = flair if flair else "Admin"
-            # Pour l'external_id du rôle, on utilise le nom du rôle car Reddit n'a pas d'ID de rôle fixe
+            # Note: Dans moderators list, chaque objet a un attribut 'mod_permissions'
+            permissions = getattr(mod, 'mod_permissions', [])
+            # On cherche s'il a un flair sur le subreddit
+            # (PRAW n'expose pas forcément le flair dans l'objet Redditor du menu modo directement)
+            # On met 'Admin' par défaut, l'enrichissement fera le reste plus tard.
+            role_name = "Admin"
             role_external_id = f"reddit_role_{role_name.lower()}"
 
-            # Upsert Role
+            # 1. Upsert Role
             cur.execute("""
                 INSERT INTO platform_roles (
                     id, game_platform_id, external_id, name, permissions, updated_at
@@ -75,12 +85,12 @@ def sync_moderators():
                 game_platform_id, 
                 role_external_id, 
                 role_name, 
-                psycopg2.extras.Json({"mod_permissions": mod.get("mod_permissions", [])})
+                Json({"mod_permissions": permissions})
             ))
             role_id = cur.fetchone()[0]
 
-            # 2. Gestion du Membre
-            # Upsert Member
+            # 2. Upsert Member
+            # On stocke le strict minimum, l'enrichissement fera le reste
             cur.execute("""
                 INSERT INTO platform_members (
                     id, game_platform_id, external_id, username, display_name, metadata, updated_at
@@ -97,8 +107,8 @@ def sync_moderators():
                 game_platform_id,
                 user_id,
                 username,
-                username, # Display name same as username initially
-                psycopg2.extras.Json(mod) # On stocke tout le JSON brut dans metadata
+                username,
+                Json({"reddit_id": mod.id, "permissions": permissions})
             ))
             member_id = cur.fetchone()[0]
 

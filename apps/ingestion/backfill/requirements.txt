@@ -5,3 +5,4 @@ kafka-python  # Conseil : remplace kafka-python par kafka-python-ng
 psycopg2-binary
 python-dotenv
 requests
+praw
