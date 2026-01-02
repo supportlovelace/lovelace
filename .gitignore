@@ -41,3 +41,4 @@ yarn-error.log*
 storybook-static
 .vscode
 infra/docker-compose.yml
+test/

@@ -28,9 +28,10 @@ tasks:
     env:
       SUBREDDIT: "{{ inputs.subreddit }}"
       GAME_ID: "{{ inputs.gameId }}"
-      # On reconstruit l'URL si besoin, ou on utilise le secret complet s'il existe
-      # DB_URL format: postgresql://user:pass@host:port/db
       DB_URL: "postgresql://{{ secret('DB_USER') }}:{{ secret('DB_PASSWORD') }}@postgres:5432/lovelace"
+      # Configuration Zyte + Session Cookie
+      ZYTE_API_KEY: "{{ secret('ZYTE_API_KEY') }}"
+      REDDIT_SESSION: "{{ secret('REDDIT_SESSION') }}"
     commands:
       - python /app/backfill/reddit_moderators.py
 
