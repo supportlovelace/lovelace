@@ -13,6 +13,7 @@ import { Platforms } from './pages/Platforms';
 import { PlatformDetails } from './pages/PlatformDetails';
 import { Tooltips } from './pages/Tooltips';
 import { OnboardingGlobal } from './pages/OnboardingGlobal';
+import { Monitoring } from './pages/Monitoring';
 import { Discord } from './pages/Discord';
 import { DiscordDetails } from './pages/DiscordDetails';
 import { Toaster } from '@repo/ui/components/ui/sonner';
@@ -43,6 +44,7 @@ function App() {
               <Route path="/platforms/:id" component={PlatformDetails} />
               <Route path="/tooltips" component={Tooltips} />
               <Route path="/onboarding-global" component={OnboardingGlobal} />
+              <Route path="/monitoring" component={Monitoring} />
               <Route path="/discord" component={Discord} />
               <Route path="/discord/:id" component={DiscordDetails} />
               

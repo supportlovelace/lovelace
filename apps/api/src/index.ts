@@ -17,10 +17,17 @@ import { startImportWorker } from './worker/import-worker';
 // --- SOCKET.IO SETUP (BUN ENGINE) ---
 const io = new Server({
   cors: {
-    origin: [
-      "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
-      "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175"
-    ],
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        "http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
+        "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175"
+      ];
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }

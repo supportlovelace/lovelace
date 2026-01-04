@@ -61,7 +61,7 @@ tasks:
   # 2. Webhook de succès
   - id: notify_temporal_success
     type: io.kestra.plugin.core.http.Request
-    uri: "{{ secret('LOVELACE_API_URL') }}/admin/onboarding/kestra/callback"
+    uri: "http://100.111.190.11:3000/admin/onboarding/kestra/callback"
     method: POST
     headers:
       x-user-id: "{{ secret('SYSTEM_USER_ID') }}"

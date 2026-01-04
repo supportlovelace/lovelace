@@ -1,8 +1,11 @@
 dlt[clickhouse]>=1.19.0
 pandas>=2.2.0
 boto3
-kafka-python  # Conseil : remplace kafka-python par kafka-python-ng
+kafka-python
 psycopg2-binary
 python-dotenv
 requests
 praw
+zyte-api
+zyte-common-items
+parsel

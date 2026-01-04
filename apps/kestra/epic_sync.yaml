@@ -1,9 +1,9 @@
-id: reddit-sync
+id: epic-sync
 namespace: lovelace.ingestion
-description: "Sync Reddit Moderators to Postgres"
+description: "Sync Epic Games Scores via Zyte"
 
 inputs:
-  - id: subreddit
+  - id: slug
     type: STRING
     required: true
   - id: gameId
@@ -14,7 +14,7 @@ inputs:
     required: true
 
 tasks:
-  - id: sync_mods
+  - id: scrape_epic
     type: io.kestra.plugin.scripts.python.Commands
     taskRunner:
       type: io.kestra.plugin.scripts.runner.docker.Docker
@@ -26,16 +26,12 @@ tasks:
         username: supportlovelace
         password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
     env:
-      SUBREDDIT: "{{ inputs.subreddit }}"
-      GAME_ID: "{{ inputs.gameId }}"
-      DB_URL: "postgresql://{{ secret('DB_USER') }}:{{ secret('DB_PASSWORD') }}@postgres:5432/lovelace"
-      # Configuration Zyte + Session Cookie
       ZYTE_API_KEY: "{{ secret('ZYTE_API_KEY') }}"
-      REDDIT_SESSION: "{{ secret('REDDIT_SESSION') }}"
     commands:
-      - python /app/backfill/reddit_moderators.py
+      - python /app/scraping/epic_score.py {{ inputs.slug }} > result.json
+    outputFiles:
+      - result.json
 
-  # Webhook de succès
   - id: notify_temporal_success
     type: io.kestra.plugin.core.http.Request
     uri: "http://100.111.190.11:3000/admin/onboarding/kestra/callback"
@@ -47,10 +43,9 @@ tasks:
       {
         "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
         "status": "SUCCESS",
-        "result": { "message": "Reddit Mods Synced" }
+        "result": {{ read('result.json') }}
       }
 
-# Gestion d'erreurs
 errors:
   - id: notify_temporal_error
     type: io.kestra.plugin.core.http.Request
@@ -63,5 +58,5 @@ errors:
       {
         "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
         "status": "FAILED",
-        "result": { "error": "Reddit Sync Failed" }
+        "result": { "error": "Epic Scrape Failed" }
       }

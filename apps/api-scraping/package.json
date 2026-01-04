@@ -1,0 +1,19 @@
+{
+  "name": "@lovelace/api-scraping",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot ./src/index.ts",
+    "start": "bun run ./src/index.ts",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "hono": "^4.11.3"
+  }
+}

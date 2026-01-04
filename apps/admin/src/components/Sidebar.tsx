@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Building2, Users, LayoutDashboard, Database, Gamepad2, Share2, HelpCircle, MessageSquare, Settings2 } from 'lucide-react';
+import { Building2, Users, LayoutDashboard, Database, Gamepad2, Share2, HelpCircle, MessageSquare, Settings2, ShieldAlert } from 'lucide-react';
 
 export function Sidebar() {
   const [location] = useLocation();
@@ -36,6 +36,12 @@ export function Sidebar() {
       title: "IAM",
       items: [
         { href: "/users", label: "Utilisateurs", icon: Users },
+      ]
+    },
+    {
+      title: "Monitoring",
+      items: [
+        { href: "/monitoring", label: "Alertes", icon: ShieldAlert },
       ]
     }
   ];

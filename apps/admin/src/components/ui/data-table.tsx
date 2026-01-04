@@ -40,6 +40,7 @@ interface DataTableProps<TData, TValue> {
   onRowClick?: (row: TData) => void
   searchPlaceholder?: string
   getRowStyle?: (row: TData) => React.CSSProperties
+  children?: React.ReactNode
 }
 
 export function DataTable<TData, TValue>({
@@ -48,6 +49,7 @@ export function DataTable<TData, TValue>({
   onRowClick,
   searchPlaceholder = "Rechercher...",
   getRowStyle,
+  children,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = React.useState<string>("")
@@ -70,14 +72,17 @@ export function DataTable<TData, TValue>({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4 px-1">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder={searchPlaceholder}
-            value={globalFilter ?? ""}
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            className="pl-9"
-          />
+        <div className="flex items-center gap-4 flex-1">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder={searchPlaceholder}
+              value={globalFilter ?? ""}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              className="pl-9"
+            />
+          </div>
+          {children}
         </div>
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-gray-500">

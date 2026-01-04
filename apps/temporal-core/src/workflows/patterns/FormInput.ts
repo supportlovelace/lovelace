@@ -33,7 +33,7 @@ export async function FormInputWorkflow(params: {
     gameId,
     stepSlug,
     workflowId: info.workflowId,
-    type: 'CONFIG_FORM', // On réutilise ce type qui est déjà géré par ton DynamicFormDialog
+    type: 'FORM_INPUT', // Nouveau type dédié
     config: {
       title: config.title || "Formulaire",
       description: config.description || "Veuillez remplir les informations.",

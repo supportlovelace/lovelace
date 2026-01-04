@@ -1,0 +1,1 @@
+ALTER TABLE "platforms" ADD COLUMN "is_hub" boolean DEFAULT false NOT NULL;

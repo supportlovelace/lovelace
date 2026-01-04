@@ -27,16 +27,18 @@ import * as z from 'zod'
 import { api, devHeaders } from '../lib/api'
 import { mutate } from 'swr'
 import { toast } from 'sonner'
-import { Share2, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Share2, Plus, Pencil, Trash2, Filter, FilterX } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { ImageUpload } from '../components/image-upload'
+import { Badge } from '@repo/ui/components/ui/badge'
 
 const platformSchema = z.object({
   name: z.string().min(1, "Nom requis"),
   slug: z.string().min(1, "Slug requis"),
   logoAssetId: z.string().nullable().optional(),
   hasChannel: z.boolean().default(false),
+  isHub: z.boolean().default(false),
   isActive: z.boolean().default(true),
   color: z.string().optional(),
   configSchema: z.string().default(""), // On va transformer en array après
@@ -51,6 +53,18 @@ export function Platforms() {
   const [actionLoading, setActionLoading] = useState(false)
   const [, setLocation] = useLocation()
 
+  // Filtres
+  const [filterActive, setFilterActive] = useState<boolean | null>(null)
+  const [filterHub, setFilterHub] = useState<boolean | null>(null)
+  const [filterChannels, setFilterChannels] = useState<boolean | null>(null)
+
+  const filteredPlatforms = (data?.platforms || []).filter((p: any) => {
+    if (filterActive !== null && p.isActive !== filterActive) return false
+    if (filterHub !== null && p.isHub !== filterHub) return false
+    if (filterChannels !== null && p.hasChannel !== filterChannels) return false
+    return true
+  })
+
   const form = useForm<z.infer<typeof platformSchema>>({
     resolver: zodResolver(platformSchema),
     defaultValues: {
@@ -58,6 +72,7 @@ export function Platforms() {
       slug: "",
       logoAssetId: null,
       hasChannel: false,
+      isHub: false,
       isActive: true,
       color: "#000000",
       configSchema: "",
@@ -112,6 +127,7 @@ export function Platforms() {
       slug: platform.slug,
       logoAssetId: platform.logoAssetId || null,
       hasChannel: platform.hasChannel,
+      isHub: platform.isHub || false,
       isActive: platform.isActive,
       color: platform.color || "#000000",
       configSchema: (platform.configSchema || []).join(', '),
@@ -169,6 +185,15 @@ export function Platforms() {
       )
     },
     { 
+      accessorKey: "isHub", 
+      header: "Hub",
+      cell: ({ row }) => (
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${row.getValue("isHub") ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
+          {row.getValue("isHub") ? "Oui" : "Non"}
+        </span>
+      )
+    },
+    { 
       accessorKey: "hasChannel", 
       header: "Canaux",
       cell: ({ row }) => (
@@ -219,9 +244,54 @@ export function Platforms() {
       ) : (
         <DataTable 
           columns={columns} 
-          data={data?.platforms || []} 
+          data={filteredPlatforms} 
           onRowClick={(platform) => setLocation(`/platforms/${platform.id}`)}
-        />
+        >
+          <div className="flex items-center gap-2">
+            <div className="flex gap-2 border-l pl-4 ml-2">
+              <Button 
+                variant={filterActive === true ? "default" : "outline"} 
+                size="sm" 
+                onClick={() => setFilterActive(filterActive === true ? null : true)}
+                className="rounded-full h-8 text-[10px] font-bold uppercase"
+              >
+                Actives
+              </Button>
+              <Button 
+                variant={filterHub === true ? "default" : "outline"} 
+                size="sm" 
+                onClick={() => setFilterHub(filterHub === true ? null : true)}
+                className="rounded-full h-8 text-[10px] font-bold uppercase"
+              >
+                Mode Hub
+              </Button>
+              <Button 
+                variant={filterChannels === true ? "default" : "outline"} 
+                size="sm" 
+                onClick={() => setFilterChannels(filterChannels === true ? null : true)}
+                className="rounded-full h-8 text-[10px] font-bold uppercase"
+              >
+                Canaux
+              </Button>
+            </div>
+
+            {(filterActive !== null || filterHub !== null || filterChannels !== null) && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => {
+                  setFilterActive(null)
+                  setFilterHub(null)
+                  setFilterChannels(null)
+                }}
+                className="h-8 px-2 text-[10px] font-bold uppercase text-muted-foreground hover:text-destructive"
+              >
+                <FilterX className="w-3 h-3 mr-1" />
+                Reset
+              </Button>
+            )}
+          </div>
+        </DataTable>
       )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -328,6 +398,21 @@ export function Platforms() {
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
                       <div className="space-y-0.5">
                         <FormLabel>Canaux</FormLabel>
+                      </div>
+                      <FormControl>
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="isHub"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm col-span-2">
+                      <div className="space-y-0.5">
+                        <FormLabel>Mode Hub</FormLabel>
+                        <p className="text-[10px] text-muted-foreground">Visible dans le Hub unifié.</p>
                       </div>
                       <FormControl>
                         <Switch checked={field.value} onCheckedChange={field.onChange} />

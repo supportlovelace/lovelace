@@ -41,6 +41,7 @@ interface DynamicFormDialogProps {
   onOpenChange: (open: boolean) => void
   gameId: string
   step: any
+  requestId?: string
   onSuccess: () => void
 }
 
@@ -53,7 +54,7 @@ const CATEGORIES = [
   { id: 'member', label: 'Membres', icon: User, desc: "Utilisateurs standards" },
 ]
 
-function RoleMapperForm({ gameId, step, onSuccess }: { gameId: string, step: any, onSuccess: () => void }) {
+function RoleMapperForm({ gameId, step, requestId, onSuccess }: { gameId: string, step: any, requestId?: string, onSuccess: () => void }) {
   const { data: rolesData, isLoading: rolesLoading } = useGameRoles(gameId)
   const [mapping, setMapping] = useState<Record<string, string[]>>({})
   const [submitting, setSubmitting] = useState(false)
@@ -82,7 +83,7 @@ function RoleMapperForm({ gameId, step, onSuccess }: { gameId: string, step: any
         })
       })
 
-      // 2. Appel API Mapping
+      // 2. Appel API Mapping (Sauvegarde des données)
       const res = await (api.admin.games[':id'] as any).roles.mapping.$post({
         param: { id: gameId },
         json: { mapping: apiPayload },
@@ -92,19 +93,16 @@ function RoleMapperForm({ gameId, step, onSuccess }: { gameId: string, step: any
       if (!res.ok) throw new Error('Erreur sauvegarde mapping')
 
       // 3. Signal Temporal (Onboarding Request)
-      // Si l'étape est pilotée par une demande (requestId), on doit la valider.
-      // Le composant parent ne nous passe pas le requestId directement ici, mais il est souvent lié au step.
-      // Si c'est un FORM_PATTERN via Temporal, on doit appeler l'API de fin de step ou submit request.
-      
-      // Note: Pour FORM_PATTERN, le workflow attend un signal `onboarding_input_received`.
-      // On utilise `submitOnboardingRequest` si on a l'ID de la request, ou l'endpoint générique du step si c'est un `trigger`.
-      
-      // Ici, le plus sûr est d'utiliser l'endpoint de soumission du formulaire générique
-      await api.admin.onboarding[':gameId'][':slug']['complete'].$post({
-        param: { gameId, slug: step.slug },
-        json: { status: 'completed', result: { mappingCount: Object.keys(apiPayload).length } },
-        header: devHeaders(),
-      })
+      if (requestId) {
+        await submitOnboardingRequest(requestId, { mappingCount: Object.keys(apiPayload).length })
+      } else {
+        // Fallback si pas de request (ex: mode manuel sans workflow)
+        await api.admin.onboarding[':gameId'][':slug']['complete'].$post({
+          param: { gameId, slug: step.slug },
+          json: { status: 'completed', result: { mappingCount: Object.keys(apiPayload).length } },
+          header: devHeaders(),
+        })
+      }
 
       toast.success("Rôles mis à jour")
       onSuccess()
@@ -168,6 +166,7 @@ export function DynamicFormDialog({
   onOpenChange,
   gameId,
   step,
+  requestId,
   onSuccess
 }: DynamicFormDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
@@ -197,27 +196,16 @@ export function DynamicFormDialog({
   const onSubmitGeneric = async (values: any) => {
     setIsLoading(true)
     try {
-      // Pour FORM_PATTERN, le workflow attend un signal via 'requests/submit' normalement
-      // Mais ici on utilise l'endpoint 'complete' direct pour faire simple si on n'a pas l'ID de request sous la main
-      // ATTENTION: Si c'est un workflow FormInput, il attend un signal "onboarding_input_received".
-      // Il faut retrouver l'ID de la request si possible, sinon on doit trigger le signal manuellement.
-      
-      // Simplification : On suppose que l'API 'complete' gère le signal ou le workflow state.
-      // (En réalité, FormInputWorkflow attend un signal. On va utiliser 'complete' qui met à jour le statut en base, 
-      // mais le workflow doit aussi être notifié. L'endpoint 'complete' ne fait PAS de signal par défaut).
-      
-      // CORRECTIF : Il faut utiliser submitOnboardingRequest si on peut.
-      // Mais ici on n'a pas le requestId en props.
-      // On va utiliser le hack du signal via 'complete' si implémenté, sinon on post sur 'requests/submit' via un lookup.
-      
-      // Pour l'instant, on laisse l'ancien endpoint qui semble marcher pour les cas simples
-      const res = await api.admin.onboarding[':gameId'][':slug']['complete'].$post({
-        param: { gameId, slug: step.slug },
-        json: { status: 'completed', result: values },
-        header: devHeaders(),
-      })
-
-      if (!res.ok) throw new Error('Erreur API')
+      if (requestId) {
+        await submitOnboardingRequest(requestId, values)
+      } else {
+        const res = await api.admin.onboarding[':gameId'][':slug']['complete'].$post({
+          param: { gameId, slug: step.slug },
+          json: { status: 'completed', result: values },
+          header: devHeaders(),
+        })
+        if (!res.ok) throw new Error('Erreur API')
+      }
       
       toast.success("Informations enregistrées")
       onSuccess()
@@ -240,7 +228,7 @@ export function DynamicFormDialog({
         </DialogHeader>
 
         {formType === 'ROLE_MAPPING' ? (
-          <RoleMapperForm gameId={gameId} step={step} onSuccess={() => { onSuccess(); onOpenChange(false); }} />
+          <RoleMapperForm gameId={gameId} step={step} requestId={requestId} onSuccess={() => { onSuccess(); onOpenChange(false); }} />
         ) : (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmitGeneric)} className="space-y-4 py-4">

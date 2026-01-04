@@ -9,6 +9,7 @@ export const platforms = pgTable('platforms', {
   slug: text('slug').notNull().unique(),
   logoAssetId: uuid('logo_asset_id').references(() => assets.id),
   hasChannel: boolean('has_channel').default(false).notNull(),
+  isHub: boolean('is_hub').default(false).notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   configSchema: jsonb('config_schema').default([]).notNull(), // Liste des champs requis ex: ['appId', 'apiKey']
   color: text('color'), // ex: '#1b2838' pour Steam

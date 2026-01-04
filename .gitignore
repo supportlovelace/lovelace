@@ -37,6 +37,17 @@ yarn-error.log*
 .DS_Store
 *.pem
 
+# Python
+venv/
+.venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.uv/
+
 *storybook.log
 storybook-static
 .vscode

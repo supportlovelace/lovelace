@@ -10,6 +10,7 @@ import tooltipsRoute from "./tooltips";
 import dashboardRoute from "./dashboard";
 import discordRoute from "./discord";
 import onboardingRoute from "./onboarding";
+import monitoringRoute from "./monitoring";
 
 // Type pour le contexte avec userId (important pour que TS suive)
 type Variables = {
@@ -32,5 +33,6 @@ admin.route("/assets", assetsRoute);
 admin.route("/tooltips", tooltipsRoute);
 admin.route("/discord", discordRoute);
 admin.route("/onboarding", onboardingRoute);
+admin.route("/monitoring", monitoringRoute);
 
 export default admin;

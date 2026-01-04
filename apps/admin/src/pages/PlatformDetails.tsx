@@ -41,6 +41,7 @@ const platformSchema = z.object({
   name: z.string().min(1, "Le nom est requis"),
   color: z.string().optional(),
   isActive: z.boolean().default(true),
+  isHub: z.boolean().default(false),
   configSchema: z.string().default(""),
 })
 
@@ -75,12 +76,14 @@ export function PlatformDetails() {
       name: "",
       color: "#000000",
       isActive: true,
+      isHub: false,
       configSchema: ""
     },
     values: platformData?.platform ? {
       name: platformData.platform.name,
       color: platformData.platform.color || "#000000",
       isActive: platformData.platform.isActive,
+      isHub: platformData.platform.isHub,
       configSchema: (platformData.platform.configSchema || []).join(', ')
     } : undefined
   })
@@ -107,6 +110,7 @@ export function PlatformDetails() {
         name: platformData.platform.name,
         color: platformData.platform.color || "#000000",
         isActive: platformData.platform.isActive,
+        isHub: platformData.platform.isHub,
         configSchema: (platformData.platform.configSchema || []).join(', ')
       })
     }
@@ -345,10 +349,15 @@ export function PlatformDetails() {
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Statut</label>
-                  <div className="mt-1">
+                  <div className="mt-1 flex gap-2">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${platform.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {platform.isActive ? 'Actif' : 'Inactif'}
                     </span>
+                    {platform.isHub && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-100 text-blue-700">
+                        Hub
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="lg:col-span-2">
@@ -479,19 +488,26 @@ export function PlatformDetails() {
                 <FormItem><FormLabel className="font-semibold">Nom de la plateforme</FormLabel><FormControl><Input {...field} className="bg-white" /></FormControl><FormMessage /></FormItem>
               )} />
               
+              <FormField control={platformForm.control} name="color" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="font-semibold">Couleur</FormLabel>
+                  <div className="flex gap-2">
+                    <FormControl><Input {...field} placeholder="#000000" className="font-mono bg-white" /></FormControl>
+                    <input type="color" value={field.value} onChange={(e) => field.onChange(e.target.value)} className="w-10 h-10 p-1 rounded-md border cursor-pointer" />
+                  </div>
+                </FormItem>
+              )} />
+              
               <div className="grid grid-cols-2 gap-4">
-                <FormField control={platformForm.control} name="color" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="font-semibold">Couleur</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl><Input {...field} placeholder="#000000" className="font-mono bg-white" /></FormControl>
-                      <input type="color" value={field.value} onChange={(e) => field.onChange(e.target.value)} className="w-10 h-10 p-1 rounded-md border cursor-pointer" />
-                    </div>
-                  </FormItem>
-                )} />
                 <FormField control={platformForm.control} name="isActive" render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 bg-white shadow-sm self-end h-[40px]">
                     <FormLabel className="text-xs font-bold uppercase text-slate-500">Active</FormLabel>
+                    <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={platformForm.control} name="isHub" render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 bg-white shadow-sm self-end h-[40px]">
+                    <FormLabel className="text-xs font-bold uppercase text-slate-500">Hub</FormLabel>
                     <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
                   </FormItem>
                 )} />

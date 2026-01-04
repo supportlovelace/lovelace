@@ -559,6 +559,7 @@ export function GameDetails() {
                     setSelectedStep(step);
                     if (pendingRequest.type === 'UPLOAD_CSV') setIsImportDialogOpen(true);
                     if (pendingRequest.type === 'CONFIG_FORM') setIsConfigDialogOpen(true);
+                    if (pendingRequest.type === 'FORM_INPUT') setIsFormDialogOpen(true);
                 }}
               >
                 Action Requise
@@ -664,7 +665,7 @@ export function GameDetails() {
                         Annuler l'Onboarding
                       </Button>
                     ) : (
-                      (!onboardingData?.onboarding?.every((s: any) => s.status === 'completed' || s.status === 'skipped')) && (
+                      (!onboardingData?.onboarding?.every((s: any) => s.status === 'completed')) && (
                         <Button 
                           onClick={onStartFullOnboarding} 
                           disabled={actionLoading}
@@ -819,7 +820,15 @@ export function GameDetails() {
               <FormField control={integrationForm.control} name="platformId" render={({ field }) => (
                 <FormItem className="flex flex-col"><FormLabel>Plateforme</FormLabel>
                   <FormControl>
-                    <Combobox items={(allPlatformsData?.platforms || []).map((p: any) => ({ value: p.id, label: p.name }))} value={field.value} onSelect={field.onChange} placeholder="Choisir une plateforme..." modal />
+                    <Combobox 
+                      items={(allPlatformsData?.platforms || [])
+                        .filter((p: any) => p.isActive)
+                        .map((p: any) => ({ value: p.id, label: p.name }))} 
+                      value={field.value} 
+                      onSelect={field.onChange} 
+                      placeholder="Choisir une plateforme..." 
+                      modal 
+                    />
                   </FormControl><FormMessage />
                 </FormItem>
               )} />
@@ -914,6 +923,10 @@ export function GameDetails() {
           onOpenChange={setIsFormDialogOpen}
           gameId={gameId!}
           step={selectedStep}
+          requestId={requestsData?.requests?.find((r: any) => 
+            (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && r.config.platformSlug === selectedStep.platform)) && 
+            (r.type === 'FORM_INPUT' || r.type === 'CONFIG_FORM')
+          )?.id}
           onSuccess={() => mutate(['game-onboarding', gameId])}
         />
       )}

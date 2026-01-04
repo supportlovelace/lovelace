@@ -1,13 +1,19 @@
 import { useStats, useHealth } from '../hooks/use-stats'
-import { Users, Gamepad2, Share2, Activity, CheckCircle2, XCircle, AlertTriangle, Zap, Clock } from 'lucide-react'
+import { useAlerts } from '../hooks/use-monitoring'
+import { Users, Gamepad2, Share2, Activity, CheckCircle2, XCircle, AlertTriangle, Zap, Clock, ShieldAlert } from 'lucide-react'
+import { Link } from 'wouter'
 
 export function Home() {
   const { data: statsData, isLoading: statsLoading } = useStats()
   const { data: healthData, isLoading: healthLoading } = useHealth()
+  const { data: alertsData, isLoading: alertsLoading } = useAlerts()
 
   const stats = statsData?.stats || { users: 0, games: 0, platforms: 0, pendingActions: 0, onboarding: { running: 0, completed: 0, total: 0 } }
   const isUp = healthData?.status === 'ok'
   const temporalUp = statsData?.services?.temporal === 'up'
+  
+  const firingAlerts = (alertsData?.alerts || []).filter((a: any) => a.status === 'firing')
+  const alertCount = firingAlerts.length;
 
   return (
     <div className="space-y-8">
@@ -74,16 +80,25 @@ export function Home() {
         </div>
       </div>
 
-      {/* Onboarding Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className={`p-6 rounded-xl border shadow-sm space-y-2 transition-all ${stats.pendingActions > 0 ? 'bg-orange-50 border-orange-200 ring-1 ring-orange-500/20' : 'bg-white opacity-60'}`}>
+      {/* Onboarding & Monitoring Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Link href="/onboarding-global" className={`p-6 rounded-xl border shadow-sm space-y-2 transition-all hover:scale-[1.02] cursor-pointer ${stats.pendingActions > 0 ? 'bg-orange-50 border-orange-200 ring-1 ring-orange-500/20' : 'bg-white'}`}>
           <div className={`flex items-center justify-between ${stats.pendingActions > 0 ? 'text-orange-600' : 'text-slate-400'}`}>
             <AlertTriangle className={`w-5 h-5 ${stats.pendingActions > 0 ? 'animate-bounce' : ''}`} />
             <span className="text-xs font-bold uppercase tracking-wider">Actions</span>
           </div>
           <p className="text-3xl font-bold">{statsLoading ? '...' : stats.pendingActions}</p>
           <p className={`text-sm ${stats.pendingActions > 0 ? 'text-orange-700 font-medium' : 'text-slate-500'}`}>Demandes en attente</p>
-        </div>
+        </Link>
+
+        <Link href="/monitoring" className={`p-6 rounded-xl border shadow-sm space-y-2 transition-all hover:scale-[1.02] cursor-pointer ${alertCount > 0 ? 'bg-red-50 border-red-200 ring-1 ring-red-500/20' : 'bg-white opacity-60'}`}>
+          <div className={`flex items-center justify-between ${alertCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+            <ShieldAlert className={`w-5 h-5 ${alertCount > 0 ? 'animate-pulse' : ''}`} />
+            <span className="text-xs font-bold uppercase tracking-wider">Incidents</span>
+          </div>
+          <p className="text-3xl font-bold">{alertsLoading ? '...' : alertCount}</p>
+          <p className={`text-sm ${alertCount > 0 ? 'text-red-700 font-medium' : 'text-slate-500'}`}>Alertes actives (Keep)</p>
+        </Link>
 
         <div className="bg-white p-6 rounded-xl border shadow-sm space-y-2">
           <div className="flex items-center justify-between text-blue-500">
