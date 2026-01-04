@@ -43,7 +43,7 @@ tasks:
       {
         "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
         "status": "SUCCESS",
-        "result": {{ read('result.json') }}
+        "result": {{ read(outputs.scrape_epic.outputFiles['result.json']) }}
       }
 
 errors:

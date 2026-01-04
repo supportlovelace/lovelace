@@ -31,18 +31,18 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
   }
 
   try {
-    // 3. VALIDATION DES CONFIGS
-    const platforms = [...new Set(stepsToProcess.map((s: any) => s.platform).filter(Boolean))];
+    // 3. VALIDATION DES CONFIGS (BATCH)
+    const platforms = [...new Set(stepsToProcess.map((s: any) => s.platform).filter(Boolean))] as string[];
     
-    for (const platform of platforms) {
-      const isValid = await actions.validatePlatformConfig({
+    if (platforms.length > 0) {
+      const isValid = await actions.validateAllPlatformConfigs({
         gameId,
-        platformSlug: platform as string,
+        platforms,
         workflowId: info.workflowId
       });
 
       if (!isValid) {
-        console.log(`💤 [MainWorkflow] Config manquante pour ${platform}. En attente...`);
+        console.log(`💤 [MainWorkflow] Configs manquantes pour certaines plateformes. En attente...`);
         await condition(() => userInput !== null);
         userInput = null;
       }
@@ -72,52 +72,60 @@ export async function MainOnboardingWorkflow(gameId: string): Promise<void> {
     const stepsToRun = stepsToProcess.filter((s: any) => validatedSlugs.includes(s.slug));
     const platformGroups = [...new Set(stepsToRun.map((s: any) => s.platform))];
 
-    const results = await Promise.allSettled(platformGroups.map(async (platform) => {
-      const platformSteps = stepsToRun.filter((s: any) => s.platform === platform);
-      
-      for (const step of platformSteps) {
-        const config = step.executorConfig as any;
+    const results: any[] = [];
+    
+    for (const platform of platformGroups) {
+      try {
+        const platformSteps = stepsToRun.filter((s: any) => s.platform === platform);
         
-        if (config.onboardingType === 'CSV_INGESTION_PATTERN') {
-          await executeChild(CsvIngestionWorkflow, {
-            args: [{ gameId, stepSlug: step.slug, config: config.params }],
-            workflowId: `csv-ingest-${gameId}-${step.slug}`,
-          });
-        }
-        else if (config.onboardingType === 'KESTRA_JOB_PATTERN') {
-          await executeChild(KestraJobWorkflow, {
-            args: [{
-              gameId,
-              stepSlug: step.slug,
-              config: config.params,
-              platform: step.platform
-            }],
-            workflowId: `kestra-job-${gameId}-${step.slug}`,
-          });
-        }
-        else if (config.onboardingType === 'FORM_PATTERN') {
-          await executeChild(FormInputWorkflow, {
-            args: [{ gameId, stepSlug: step.slug, config: config.params }],
-            workflowId: `form-input-${gameId}-${step.slug}`,
-          });
-        }
-        else if (step.executorType === 'temporal_activity') {
-          const activityName = config.activityName;
-          const activityParams = config.params || {};
+        for (const step of platformSteps) {
+          const config = step.executorConfig as any;
+          
+          if (config.onboardingType === 'CSV_INGESTION_PATTERN') {
+            await executeChild(CsvIngestionWorkflow, {
+              args: [{ gameId, stepSlug: step.slug, config: config.params }],
+              workflowId: `csv-ingest-${gameId}-${step.slug}`,
+            });
+          }
+          else if (config.onboardingType === 'KESTRA_JOB_PATTERN') {
+            await executeChild(KestraJobWorkflow, {
+              args: [{
+                gameId,
+                stepSlug: step.slug,
+                config: config.params,
+                platform: step.platform
+              }],
+              workflowId: `kestra-job-${gameId}-${step.slug}`,
+            });
+          }
+          else if (config.onboardingType === 'FORM_PATTERN') {
+            await executeChild(FormInputWorkflow, {
+              args: [{ gameId, stepSlug: step.slug, config: config.params }],
+              workflowId: `form-input-${gameId}-${step.slug}`,
+            });
+          }
+          else if (step.executorType === 'temporal_activity') {
+            const activityName = config.activityName;
+            const activityParams = config.params || {};
 
-          if (activityName) {
-            await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'running' });
-            try {
-              await (actions as any)[activityName]({ ...activityParams, gameId, stepSlug: step.slug, workflowId: info.workflowId });
-              await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'completed' });
-            } catch (e: any) {
-              await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'error', result: { error: e.message } });
-              throw e; // Rethrow to mark platform group as failed
+            if (activityName) {
+              await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'running' });
+              try {
+                await (actions as any)[activityName]({ ...activityParams, gameId, stepSlug: step.slug, workflowId: info.workflowId });
+                await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'completed' });
+              } catch (e: any) {
+                await actions.updateOnboardingStatus({ gameId, stepSlug: step.slug, status: 'error', result: { error: e.message } });
+                throw e; 
+              }
             }
           }
         }
+        results.push({ status: 'fulfilled', value: platform });
+      } catch (e: any) {
+        console.error(`❌ [MainWorkflow] Platform ${platform} failed:`, e);
+        results.push({ status: 'rejected', reason: e });
       }
-    }));
+    }
 
     // Analyse des résultats
     const failures = results.filter(r => r.status === 'rejected');

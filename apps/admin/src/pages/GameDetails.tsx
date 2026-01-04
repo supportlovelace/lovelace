@@ -536,7 +536,10 @@ export function GameDetails() {
         // Vérifier si une requête attend ce step (directement ou par plateforme)
         const pendingRequest = requestsData?.requests?.find((r: any) => 
           r.stepSlug === step.slug || 
-          (r.type === 'CONFIG_FORM' && r.config.platformSlug === step.platform)
+          (r.type === 'CONFIG_FORM' && (
+            r.config.platformSlug === step.platform || 
+            (r.config.isBatch && r.config.updates?.some((u: any) => u.platformSlug === step.platform))
+          ))
         );
 
         return (
@@ -924,7 +927,7 @@ export function GameDetails() {
           gameId={gameId!}
           step={selectedStep}
           requestId={requestsData?.requests?.find((r: any) => 
-            (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && r.config.platformSlug === selectedStep.platform)) && 
+            (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && (r.config.platformSlug === selectedStep.platform || (r.config.isBatch && r.config.updates?.some((u: any) => u.platformSlug === selectedStep.platform))))) && 
             (r.type === 'FORM_INPUT' || r.type === 'CONFIG_FORM')
           )?.id}
           onSuccess={() => mutate(['game-onboarding', gameId])}
@@ -933,7 +936,7 @@ export function GameDetails() {
 
       {selectedStep && isConfigDialogOpen && (() => {
         const configRequest = requestsData?.requests?.find((r: any) => 
-          (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && r.config.platformSlug === selectedStep.platform)) && 
+          (r.stepSlug === selectedStep.slug || (r.type === 'CONFIG_FORM' && (r.config.platformSlug === selectedStep.platform || (r.config.isBatch && r.config.updates?.some((u: any) => u.platformSlug === selectedStep.platform))))) && 
           r.type === 'CONFIG_FORM'
         );
         if (!configRequest) return null;

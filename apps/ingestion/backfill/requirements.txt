@@ -9,3 +9,4 @@ praw
 zyte-api
 zyte-common-items
 parsel
+discord.py
