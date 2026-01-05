@@ -1,6 +1,6 @@
 id: discord-sync-channels
 namespace: lovelace.ingestion
-description: "Fetch Discord Channels and push to Kafka for async ingestion"
+description: "Fetch Discord Channels via DLT and push to Kafka"
 
 inputs:
   - id: guildId
@@ -17,7 +17,7 @@ inputs:
     required: true
 
 tasks:
-  - id: scrape_channels
+  - id: sync_channels
     type: io.kestra.plugin.scripts.python.Commands
     taskRunner:
       type: io.kestra.plugin.scripts.runner.docker.Docker
@@ -30,6 +30,10 @@ tasks:
         password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
     env:
       DISCORD_TOKEN: "{{ secret('DISCORD_TOKEN') }}"
+      KAFKA_BROKERS: "redpanda:9092"
+      GAME_ID: "{{ inputs.gameId }}"
+      STEP_SLUG: "{{ inputs.stepSlug }}"
+      WORKFLOW_ID: "{{ inputs.temporalWorkflowId }}"
     commands:
       - python /app/scraping/discord_channels.py {{ inputs.guildId }} > result.json
     outputFiles:
@@ -44,32 +48,11 @@ tasks:
     contentType: application/json
     body: |
       {
-        "totalItems": {{ json(read(outputs.scrape_channels.outputFiles['result.json'])).count }},
+        "totalItems": {{ json(read(outputs.sync_channels.outputFiles['result.json'])).count }},
         "workflowId": "{{ inputs.temporalWorkflowId }}"
       }
 
-  - id: push_channels
-    type: io.kestra.plugin.core.flow.ForEach
-    values: "{{ json(read(outputs.scrape_channels.outputFiles['result.json'])).channels }}"
-    tasks:
-      - id: push_to_kafka
-        type: io.kestra.plugin.kafka.Produce
-        properties:
-          bootstrap.servers: "redpanda:9092"
-        topic: "discord_metadata"
-        from:
-          key: "{{ inputs.guildId }}"
-          value:
-            platform: "discord"
-            type: "channel"
-            gameId: "{{ inputs.gameId }}"
-            stepSlug: "{{ inputs.stepSlug }}"
-            guildId: "{{ inputs.guildId }}"
-            workflowId: "{{ inputs.temporalWorkflowId }}"
-            data: "{{ item }}"
-        valueSerializer: JSON
-
-# Gestion d'erreurs (Si le script Python ou Kafka échoue, on prévient Temporal)
+# Gestion d'erreurs
 errors:
   - id: notify_temporal_error
     type: io.kestra.plugin.core.http.Request

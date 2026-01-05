@@ -67,7 +67,7 @@ async def fetch_channels(guild_id: int):
             results.append({
                 "id": str(ch.id),
                 "name": ch.name,
-                "type": int(ch.type),
+                "type": ch.type.value,
                 "parent_id": str(ch.category_id) if ch.category_id else None,
                 "position": ch.position,
                 "nsfw": getattr(ch, 'nsfw', False),
