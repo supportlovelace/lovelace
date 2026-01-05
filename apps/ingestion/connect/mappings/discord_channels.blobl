@@ -1,0 +1,26 @@
+# Mapping Discord -> platform_channels
+let type_map = {
+  "0": "GUILD_TEXT",
+  "2": "GUILD_VOICE",
+  "4": "GUILD_CATEGORY",
+  "5": "GUILD_ANNOUNCEMENT",
+  "13": "GUILD_STAGE_VOICE",
+  "15": "GUILD_FORUM"
+}
+
+# Structure pour Postgres
+root.external_id = this.data.id
+root.name = this.data.name
+root.type = $type_map.get(this.data.type.string()) | "UNKNOWN"
+root.is_active = true
+root.metadata = {
+  "topic": this.data.topic | "",
+  "parent_id": this.data.parent_id | null,
+  "position": this.data.position | 0,
+  "nsfw": this.data.nsfw | false
+}
+
+# On garde les IDs Lovelace pour le reste du pipeline
+root.game_id = this.game_id | this.gameId
+root.workflow_id = this.workflow_id | this.workflowId
+root.step_slug = this.step_slug | this.stepSlug

@@ -11,7 +11,7 @@ from kafka import KafkaProducer
 # --- CONFIGURATION ---
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:19092")
-KAFKA_TOPIC = "discord_metadata"
+KAFKA_TOPIC = "ingestion_channels"
 
 # Metadata Lovelace pour le pipeline Connect
 GAME_ID = os.getenv("GAME_ID")

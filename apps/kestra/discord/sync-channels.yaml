@@ -35,7 +35,7 @@ tasks:
       STEP_SLUG: "{{ inputs.stepSlug }}"
       WORKFLOW_ID: "{{ inputs.temporalWorkflowId }}"
     commands:
-      - python /app/scraping/discord_channels.py {{ inputs.guildId }} > result.json
+      - python /app/scraping/discord/channels.py {{ inputs.guildId }} > result.json
     outputFiles:
       - result.json
 

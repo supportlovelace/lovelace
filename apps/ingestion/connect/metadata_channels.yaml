@@ -1,0 +1,82 @@
+# Pipeline Redpanda Connect Master pour TOUS les salons (Discord, Reddit, etc.)
+input:
+  kafka:
+    addresses: ["redpanda:9092"]
+    topics: ["ingestion_channels"]
+    consumer_group: "metadata_channels_master"
+
+pipeline:
+  processors:
+    # 1. Mapping dynamique selon la plateforme du message
+    - bloblang: |
+        import "mappings/" + this.platform + "_channels.blobl"
+    
+    # 2. Enrichissement : Récupération du gamePlatformId
+    - branch:
+        processors:
+          - cache:
+              resource: lovelace_redis
+              operator: get
+              key: 'gp_id_${!this.game_id}_${!this.platform}'
+          - catch:
+              - sql_raw:
+                  driver: "postgres"
+                  dsn: "${DB_URL}"
+                  query: |
+                    SELECT gp.id 
+                    FROM game_platforms gp
+                    JOIN platforms p ON p.id = gp.platform_id
+                    WHERE gp.game_id = $1 AND p.slug = $2
+                  args_mapping: root = [ this.game_id, this.platform ]
+              - mapping: root = this.0.id
+              - cache:
+                  resource: lovelace_redis
+                  operator: set
+                  key: 'gp_id_${!this.game_id}_${!this.platform}'
+                  value: '${!content()}'
+        result_map: root.gamePlatformId = this
+
+output:
+  broker:
+    pattern: fan_out
+    outputs:
+      # Branche Postgres : Upsert dans platform_channels
+      - sql_raw:
+          driver: "postgres"
+          dsn: "${DB_URL}"
+          query: |
+            INSERT INTO platform_channels (game_platform_id, external_id, name, type, metadata, is_active, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT (game_platform_id, external_id) DO UPDATE SET
+              name = EXCLUDED.name,
+              type = EXCLUDED.type,
+              metadata = EXCLUDED.metadata,
+              is_active = EXCLUDED.is_active,
+              updated_at = NOW();
+          args_mapping: |
+            root = [ 
+              this.gamePlatformId, 
+              this.external_id, 
+              this.name, 
+              this.type, 
+              this.metadata.as_json(), 
+              this.is_active 
+            ]
+          batching:
+            count: 100
+            period: 5s
+
+      # Branche API : Mise à jour de la progression Lovelace
+      - http_client:
+          url: "${API_URL}/admin/onboarding/${!this.game_id}/${!this.step_slug}/progress"
+          verb: POST
+          headers:
+            Content-Type: application/json
+          body: |
+            { 
+              "processedIncrement": ${! batch_size() }, 
+              "workflowId": "${!this.workflow_id}" 
+            }
+          batching:
+            count: 100
+            period: 5s
