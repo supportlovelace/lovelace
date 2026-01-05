@@ -48,22 +48,39 @@ tasks:
         "workflowId": "{{ inputs.temporalWorkflowId }}"
       }
 
-  - id: push_to_kafka
-    type: io.kestra.plugin.kafka.Produce
-    properties:
-      bootstrap.servers: "redpanda:9092"
-    topic: "discord_metadata"
-    serializer: JSON
-    key: "{{ inputs.guildId }}"
-    # On enveloppe chaque channel avec les métadonnées nécessaires pour le pipeline Connect
-    value: |
+  - id: push_channels
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{ json(read(outputs.scrape_channels.outputFiles['result.json'])).channels }}"
+    tasks:
+      - id: push_to_kafka
+        type: io.kestra.plugin.kafka.Produce
+        properties:
+          bootstrap.servers: "redpanda:9092"
+        topic: "discord_metadata"
+        from:
+          key: "{{ inputs.guildId }}"
+          value:
+            platform: "discord"
+            type: "channel"
+            gameId: "{{ inputs.gameId }}"
+            stepSlug: "{{ inputs.stepSlug }}"
+            guildId: "{{ inputs.guildId }}"
+            workflowId: "{{ inputs.temporalWorkflowId }}"
+            data: "{{ item }}"
+        valueSerializer: JSON
+
+# Gestion d'erreurs (Si le script Python ou Kafka échoue, on prévient Temporal)
+errors:
+  - id: notify_temporal_error
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://100.111.190.11:3000/admin/onboarding/kestra/callback"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
       {
-        "platform": "discord",
-        "type": "channel",
-        "gameId": "{{ inputs.gameId }}",
-        "stepSlug": "{{ inputs.stepSlug }}",
-        "guildId": "{{ inputs.guildId }}",
-        "workflowId": "{{ inputs.temporalWorkflowId }}",
-        "data": {{ json(item) }}
+        "temporalWorkflowId": "{{ inputs.temporalWorkflowId }}",
+        "status": "FAILED",
+        "result": { "error": "Discord Channels Sync Failed" }
       }
-    from: "{{ json(read(outputs.scrape_channels.outputFiles['result.json'])).channels }}"
