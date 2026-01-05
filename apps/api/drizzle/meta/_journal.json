@@ -43,6 +43,13 @@
       "when": 1767425306156,
       "tag": "0005_rich_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1767590846979,
+      "tag": "0006_clever_mimic",
+      "breakpoints": true
     }
   ]
 }

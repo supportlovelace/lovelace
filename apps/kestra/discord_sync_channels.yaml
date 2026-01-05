@@ -1,0 +1,69 @@
+id: discord-sync-channels
+namespace: lovelace.ingestion
+description: "Fetch Discord Channels and push to Kafka for async ingestion"
+
+inputs:
+  - id: guildId
+    type: STRING
+    required: true
+  - id: gameId
+    type: STRING
+    required: true
+  - id: stepSlug
+    type: STRING
+    required: true
+  - id: temporalWorkflowId
+    type: STRING
+    required: true
+
+tasks:
+  - id: scrape_channels
+    type: io.kestra.plugin.scripts.python.Commands
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      image: ghcr.io/supportlovelace/lovelace-ingestion:latest
+      pullPolicy: ALWAYS
+      networkMode: lovelace-infra_default
+      credentials:
+        registry: ghcr.io
+        username: supportlovelace
+        password: "{{ secret('GITHUB_PACKAGES_TOKEN') }}"
+    env:
+      DISCORD_TOKEN: "{{ secret('DISCORD_TOKEN') }}"
+    commands:
+      - python /app/scraping/discord_channels.py {{ inputs.guildId }} > result.json
+    outputFiles:
+      - result.json
+
+  - id: init_progress
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://100.111.190.11:3000/admin/onboarding/{{ inputs.gameId }}/{{ inputs.stepSlug }}/progress"
+    method: POST
+    headers:
+      x-user-id: "{{ secret('SYSTEM_USER_ID') }}"
+    contentType: application/json
+    body: |
+      {
+        "totalItems": {{ json(read(outputs.scrape_channels.outputFiles['result.json'])).count }},
+        "workflowId": "{{ inputs.temporalWorkflowId }}"
+      }
+
+  - id: push_to_kafka
+    type: io.kestra.plugin.kafka.Produce
+    properties:
+      bootstrap.servers: "redpanda:9092"
+    topic: "discord_metadata"
+    serializer: JSON
+    key: "{{ inputs.guildId }}"
+    # On enveloppe chaque channel avec les métadonnées nécessaires pour le pipeline Connect
+    value: |
+      {
+        "platform": "discord",
+        "type": "channel",
+        "gameId": "{{ inputs.gameId }}",
+        "stepSlug": "{{ inputs.stepSlug }}",
+        "guildId": "{{ inputs.guildId }}",
+        "workflowId": "{{ inputs.temporalWorkflowId }}",
+        "data": {{ json(item) }}
+      }
+    from: "{{ json(read(outputs.scrape_channels.outputFiles['result.json'])).channels }}"

@@ -5,8 +5,8 @@ const { triggerKestraFlow, updateOnboardingStatus, getPlatformConfig } = proxyAc
   startToCloseTimeout: '1 minute',
 });
 
-// Signal que l'API Lovelace enverra quand Kestra aura fini
-const kestraSignal = defineSignal<[{ status: string, result: any }]>('kestra_job_completed');
+// Signal unifié pour tout l'onboarding (formulaire, job kestra, ingestion async)
+const onboardingSignal = defineSignal<[any]>('onboarding_input_received');
 
 export async function KestraJobWorkflow(params: {
   gameId: string;
@@ -23,9 +23,13 @@ export async function KestraJobWorkflow(params: {
   const info = workflowInfo();
   let jobResult: { status: string, result: any } | null = null;
 
-  setHandler(kestraSignal, (payload) => {
-    console.log(`📡 [KestraJob] Signal received: ${payload.status}`);
-    jobResult = payload;
+  setHandler(onboardingSignal, (payload) => {
+    console.log(`📡 [KestraJob] Signal received: ${payload.status || 'SUCCESS'}`);
+    // On adapte le payload pour rester compatible avec la logique suivante
+    jobResult = {
+      status: payload.status || 'SUCCESS',
+      result: payload.result || payload
+    };
   });
 
   try {

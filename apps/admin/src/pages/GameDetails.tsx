@@ -10,6 +10,7 @@ import { mutate } from 'swr'
 import { api, devHeaders } from '../lib/api'
 import { Button } from '@repo/ui/components/ui/button'
 import { DataTable } from '../components/ui/data-table'
+import { GroupedDataTable } from '../components/ui/grouped-data-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@repo/ui/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/ui/tabs"
@@ -99,6 +100,7 @@ export function GameDetails() {
   const [detailsStep, setDetailsStep] = useState<any>(null)
   const [editingIntegration, setEditingIntegration] = useState<any>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [onboardingFilter, setOnboardingFilter] = useState<'all' | 'remaining' | 'errors' | 'skipped'>('all')
 
   const gameForm = useForm<z.infer<typeof gameSchema>>({
     resolver: zodResolver(gameSchema),
@@ -403,38 +405,6 @@ export function GameDetails() {
       }
     },
     {
-      accessorKey: "platformName",
-      header: "Source",
-      cell: ({ row }) => {
-        const isDimmed = ['completed', 'skipped', 'cancelled'].includes(row.original.status) || row.original.isLocked;
-        const name = row.getValue("platformName") as string;
-        const color = row.original.platformColor;
-        
-        return (
-          <div className={`flex items-center ${isDimmed ? "opacity-70 grayscale-[0.5]" : ""}`}>
-            {name ? (
-              <div 
-                className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider shadow-sm"
-                style={{
-                  backgroundColor: `${color}10`,
-                  borderColor: `${color}30`,
-                  color: color || '#666'
-                }}
-              >
-                <Share2 className="w-3 h-3" />
-                {name}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
-                <Settings2 className="w-3 h-3" />
-                Général
-              </div>
-            )}
-          </div>
-        );
-      }
-    },
-    {
       accessorKey: "status",
       header: "Statut",
       cell: ({ row }) => {
@@ -682,18 +652,153 @@ export function GameDetails() {
                   </div>
                 </div>
                 <div className="bg-white rounded-lg border overflow-hidden">
-                  {onboardingLoading ? <div className="p-8 text-center text-gray-500">Chargement...</div> :
-                    <DataTable 
-                      columns={onboardingColumns} 
-                      data={onboardingData?.onboarding || []} 
-                      getRowStyle={(row: any) => {
-                        const color = row.platformColor;
-                        return {
-                          backgroundColor: color ? `${color}10` : 'transparent',
-                          borderLeft: color ? `4px solid ${color}` : 'none'
-                        }
-                      }}
-                    />}
+                  {onboardingLoading ? (
+                    <div className="p-8 text-center text-gray-500">Chargement...</div>
+                  ) : (
+                    <div className="space-y-4 p-4 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Button 
+                            variant={onboardingFilter === 'all' ? 'default' : 'outline'} 
+                            size="sm" 
+                            onClick={() => setOnboardingFilter('all')}
+                            className="rounded-full h-8 text-[10px] font-bold uppercase"
+                          >
+                            Toutes les étapes
+                          </Button>
+                          <Button 
+                            variant={onboardingFilter === 'remaining' ? 'default' : 'outline'} 
+                            size="sm" 
+                            onClick={() => setOnboardingFilter('remaining')}
+                            className="rounded-full h-8 text-[10px] font-bold uppercase"
+                          >
+                            À faire / En cours
+                          </Button>
+                          <Button 
+                            variant={onboardingFilter === 'errors' ? 'default' : 'outline'} 
+                            size="sm" 
+                            onClick={() => setOnboardingFilter('errors')}
+                            className={`rounded-full h-8 text-[10px] font-bold uppercase ${onboardingFilter !== 'errors' && (onboardingData?.onboarding?.some((s: any) => s.status === 'error')) ? 'border-red-200 text-red-600 hover:bg-red-50' : ''}`}
+                          >
+                            {onboardingData?.onboarding?.filter((s: any) => s.status === 'error').length > 0 && (
+                              <span className="mr-1.5 flex h-2 w-2 rounded-full bg-red-500" />
+                            )}
+                            Erreurs
+                          </Button>
+                          <Button 
+                            variant={onboardingFilter === 'skipped' ? 'default' : 'outline'} 
+                            size="sm" 
+                            onClick={() => setOnboardingFilter('skipped')}
+                            className="rounded-full h-8 text-[10px] font-bold uppercase"
+                          >
+                            Passées
+                          </Button>
+                        </div>
+                        
+                        <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+                          {onboardingData?.onboarding?.length || 0} étapes au total
+                        </div>
+                      </div>
+
+                      <GroupedDataTable 
+                        columns={onboardingColumns} 
+                        data={(onboardingData?.onboarding || []).filter((step: any) => {
+                          if (onboardingFilter === 'remaining') {
+                            return !['completed', 'skipped', 'cancelled'].includes(step.status);
+                          }
+                          if (onboardingFilter === 'errors') {
+                            return step.status === 'error';
+                          }
+                          if (onboardingFilter === 'skipped') {
+                            return step.status === 'skipped';
+                          }
+                          return true;
+                        })} 
+                        groupBy="platformName"
+                        getRowStyle={(row: any) => {
+                          const color = row.platformColor;
+                          return {
+                            borderLeft: color ? `4px solid ${color}` : 'none'
+                          }
+                        }}
+                        renderGroupHeader={(value, items) => {
+                          // ON CALCUL LES STATS SUR LA DONNÉE GLOBALE, PAS SEULEMENT LES ITEMS FILTRÉS
+                          const allPlatformItems = (onboardingData?.onboarding || []).filter((s: any) => s.platformName === value);
+                          const total = allPlatformItems.length;
+                          const completed = allPlatformItems.filter((i: any) => i.status === 'completed').length;
+                          const skipped = allPlatformItems.filter((i: any) => i.status === 'skipped').length;
+                          const errors = allPlatformItems.filter((i: any) => i.status === 'error').length;
+                          const running = allPlatformItems.filter((i: any) => i.status === 'running').length;
+                          
+                          const color = allPlatformItems[0]?.platformColor || '#64748b';
+                          const logoId = allPlatformItems[0]?.platformLogoAssetId;
+
+                          const getPct = (count: number) => total > 0 ? (count / total) * 100 : 0;
+                          
+                          return (
+                            <div className="flex items-center justify-between w-full pr-4">
+                               <div className="flex items-center gap-3">
+                                  {logoId ? (
+                                    <img 
+                                      src={`${CDN_URL}/assets/${logoId}/48.webp`} 
+                                      className="w-8 h-8 object-contain rounded-md bg-white border p-0.5 shadow-sm"
+                                      alt=""
+                                    />
+                                  ) : (value ? (
+                                     <div 
+                                       className="w-8 h-8 rounded-md flex items-center justify-center text-white font-bold uppercase shadow-sm"
+                                       style={{ backgroundColor: color }}
+                                     >
+                                       {String(value)[0]}
+                                     </div>
+                                  ) : (
+                                     <div className="w-8 h-8 rounded-md bg-slate-200 flex items-center justify-center text-slate-500">
+                                       <Settings2 className="w-5 h-5" />
+                                     </div>
+                                  ))}
+                                  
+                                  <div className="min-w-[200px]">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">
+                                        {value || "Initialisation & Général"}
+                                      </h4>
+                                      {errors > 0 && <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {errors}</span>}
+                                      {running > 0 && <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1"><Activity className="w-3 h-3 animate-spin" /> {running}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-1">
+                                       {/* Segmented Progress Bar */}
+                                       <div className="h-2 w-48 bg-slate-100 rounded-full overflow-hidden flex border border-slate-200/50 shadow-inner">
+                                         {/* Completed (Green) */}
+                                         <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${getPct(completed)}%` }} title={`${completed} terminés`} />
+                                         {/* Running (Blue) */}
+                                         <div className="h-full bg-blue-500 transition-all duration-500 animate-pulse" style={{ width: `${getPct(running)}%` }} title={`${running} en cours`} />
+                                         {/* Errors (Red) */}
+                                         <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${getPct(errors)}%` }} title={`${errors} erreurs`} />
+                                         {/* Skipped (Grey) */}
+                                         <div className="h-full bg-slate-400 transition-all duration-500" style={{ width: `${getPct(skipped)}%` }} title={`${skipped} passés`} />
+                                       </div>
+                                       <span className="text-[10px] font-bold text-slate-500 font-mono tracking-tighter">
+                                         {completed + skipped}/{total}
+                                       </span>
+                                    </div>
+                                  </div>
+                               </div>
+
+                               <div className="flex items-center gap-2">
+                                  {errors > 0 ? (
+                                    <div className="px-2 py-1 bg-red-600 text-white text-[10px] font-black uppercase rounded shadow-sm">Attention</div>
+                                  ) : (completed + skipped === total) ? (
+                                    <div className="px-2 py-1 bg-emerald-600 text-white text-[10px] font-black uppercase rounded shadow-sm">OK</div>
+                                  ) : running > 0 ? (
+                                    <div className="px-2 py-1 bg-blue-600 text-white text-[10px] font-black uppercase rounded shadow-sm animate-pulse">Running</div>
+                                  ) : null}
+                               </div>
+                            </div>
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             );

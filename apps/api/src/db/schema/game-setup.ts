@@ -24,6 +24,9 @@ export const gameOnboardingProgress = pgTable('game_onboarding_progress', {
   gameId: uuid('game_id').notNull().references(() => games.id, { onDelete: 'cascade' }),
   stepSlug: text('step_slug').notNull().references(() => onboardingSteps.slug, { onDelete: 'cascade' }),
   status: text('status').notNull().default('pending'), // 'pending', 'running', 'completed', 'error'
+  totalItems: integer('total_items').default(0),
+  processedItems: integer('processed_items').default(0),
+  failedItems: integer('failed_items').default(0),
   lastRunAt: timestamp('last_run_at'),
   result: jsonb('result').default({}),
   updatedAt: timestamp('updated_at').defaultNow(),

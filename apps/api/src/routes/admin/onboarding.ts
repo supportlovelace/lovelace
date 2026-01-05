@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../../db";
 import { onboardingSteps, gameOnboardingProgress, gamePlatforms, platforms, gameOnboardingRequests, games } from "../../db/schema";
-import { eq, and, inArray, or, isNull } from "drizzle-orm";
+import { eq, and, inArray, or, isNull, sql } from "drizzle-orm";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getTemporalClient } from "../../lib/temporal";
 import { clickhouse } from "../../lib/clickhouse";
@@ -71,8 +71,8 @@ app.post("/kestra/callback", async (c) => {
     const temporal = await getTemporalClient();
     const handle = temporal.workflow.getHandle(temporalWorkflowId);
     
-    // On signale le workflow Temporal que Kestra a fini
-    await handle.signal('kestra_job_completed', { status, result });
+    // On signale le workflow Temporal que Kestra a fini (Signal UNIFIÉ)
+    await handle.signal('onboarding_input_received', { status, result });
 
     return c.json({ success: true });
   } catch (error: any) {
@@ -351,6 +351,50 @@ app.post("/config-update", async (c) => {
   }
 });
 
+// PROGRESS Update
+app.post("/:gameId/:slug/progress", async (c) => {
+  const { gameId, slug } = c.req.param();
+  const { totalItems, processedIncrement, failedIncrement, workflowId } = await c.req.json();
+
+  try {
+    const [progress] = await db.update(gameOnboardingProgress)
+      .set({
+        totalItems: totalItems !== undefined ? totalItems : undefined,
+        processedItems: sql`${gameOnboardingProgress.processedItems} + ${processedIncrement || 0}`,
+        failedItems: sql`${gameOnboardingProgress.failedItems} + ${failedIncrement || 0}`,
+        status: 'running',
+        updatedAt: new Date()
+      })
+      .where(and(eq(gameOnboardingProgress.gameId, gameId), eq(gameOnboardingProgress.stepSlug, slug)))
+      .returning();
+
+    if (!progress) return c.json({ error: "Progress not found" }, 404);
+
+    // Vérifier si c'est fini
+    if (progress.totalItems && (progress.processedItems + progress.failedItems >= progress.totalItems)) {
+      // Marquer comme complété
+      await db.update(gameOnboardingProgress)
+        .set({ status: 'completed', updatedAt: new Date() })
+        .where(and(eq(gameOnboardingProgress.gameId, gameId), eq(gameOnboardingProgress.stepSlug, slug)));
+
+      // Signaler Temporal
+      if (workflowId) {
+        const temporal = await getTemporalClient();
+        const handle = temporal.workflow.getHandle(workflowId);
+        await handle.signal('onboarding_input_received', { 
+          status: 'SUCCESS', 
+          result: { completed: true, processed: progress.processedItems } 
+        });
+      }
+    }
+
+    return c.json({ success: true, current: progress.processedItems, total: progress.totalItems });
+  } catch (error) {
+    console.error("Progress Update Error:", error);
+    return c.json({ error: "Erreur mise à jour progression" }, 500);
+  }
+});
+
 // COMPLETE Step
 app.post("/:gameId/:slug/complete", async (c) => {
   const { gameId, slug } = c.req.param();
@@ -386,19 +430,25 @@ app.get("/:gameId", async (c) => {
     const conditions = [isNull(onboardingSteps.platform)];
     if (activePlatformSlugs.length > 0) conditions.push(inArray(onboardingSteps.platform, activePlatformSlugs));
 
-    const catalogSteps = await db.select({ step: onboardingSteps, platformName: platforms.name, platformColor: platforms.color })
+    const catalogSteps = await db.select({ 
+      step: onboardingSteps, 
+      platformName: platforms.name, 
+      platformColor: platforms.color,
+      platformLogoAssetId: platforms.logoAssetId 
+    })
       .from(onboardingSteps)
       .leftJoin(platforms, eq(onboardingSteps.platform, platforms.slug))
       .where(or(...conditions)).orderBy(onboardingSteps.order);
 
     const progress = await db.select().from(gameOnboardingProgress).where(eq(gameOnboardingProgress.gameId, gameId));
 
-    const stepsWithStatus = catalogSteps.map(({ step, platformName, platformColor }) => {
+    const stepsWithStatus = catalogSteps.map(({ step, platformName, platformColor, platformLogoAssetId }) => {
       const stepProgress = progress.find(p => p.stepSlug === step.slug);
       return { 
         ...step, 
         platformName, 
         platformColor, 
+        platformLogoAssetId,
         status: stepProgress?.status || 'pending', 
         lastRunAt: stepProgress?.lastRunAt || null, 
         updatedAt: stepProgress?.updatedAt || null,

@@ -21,6 +21,7 @@ export default defineConfig({
 						{ label: 'Onboarding Configuration', slug: 'guides/onboarding' },
 						{ label: 'Workflow Lifecycle', slug: 'guides/onboarding-workflow' },
 						{ label: 'Kestra Integration', slug: 'guides/kestra-integration' },
+						{ label: 'Ingestion Architecture', slug: 'guides/ingestion-architecture' },
 						{ label: 'Example Guide', slug: 'guides/example' },
 					],
 				},
